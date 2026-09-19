@@ -21,29 +21,8 @@ const sz = 18;
 
 const tools: ToolDef[] = [
   {
-    id: "hand",
-    label: "Hand",
-    shortcut: "H",
-    icon: (
-      <svg width={sz} height={sz} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M18 11V6a1 1 0 10-2 0v5M14 10V4a1 1 0 10-2 0v6M10 9.5V5a1 1 0 10-2 0v9" />
-        <path d="M18 11a2 2 0 014 0v3a8 8 0 01-8 8h-1a8 8 0 01-8-8V8a1 1 0 112 0" />
-      </svg>
-    ),
-  },
-  {
-    id: "select",
-    label: "Select",
-    shortcut: "V",
-    icon: (
-      <svg width={sz} height={sz} viewBox="0 0 24 24" fill="currentColor" stroke="none">
-        <path d="M5.5 3.21V20.8l4.86-5.23h6.78L5.5 3.21z" />
-      </svg>
-    ),
-  },
-  {
     id: "freedraw",
-    label: "Pencil",
+    label: "Pen",
     shortcut: "P",
     icon: (
       <svg width={sz} height={sz} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
@@ -72,6 +51,8 @@ export default function IslandToolbar({ tool, onToolChange }: IslandToolbarProps
             key={t.id}
             type="button"
             title={`${t.label} — ${t.shortcut}`}
+            aria-label={t.label}
+            aria-pressed={tool === t.id}
             onClick={() => onToolChange(t.id)}
             className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
               tool === t.id

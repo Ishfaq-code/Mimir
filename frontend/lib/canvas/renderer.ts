@@ -20,6 +20,7 @@ export function renderScene(
   selectedIds: Set<string>,
   camera: Camera,
   dark: boolean,
+  hiddenIds: Set<string> = new Set(),
 ) {
   ctx.save();
   ctx.clearRect(0, 0, width, height);
@@ -37,7 +38,7 @@ export function renderScene(
   ctx.translate(-camera.x, -camera.y);
 
   for (const el of elements) {
-    if (el.isDeleted) continue;
+    if (el.isDeleted || hiddenIds.has(el.id)) continue;
     ctx.save();
     drawElement(ctx, el);
     ctx.restore();
