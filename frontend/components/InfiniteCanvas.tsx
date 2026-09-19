@@ -11,10 +11,12 @@ import type {
   TextElement,
   Tool,
 } from "@/lib/canvas/types";
-import { DEFAULT_STYLE } from "@/lib/canvas/types";
+import { DEFAULT_STYLE, pointXY } from "@/lib/canvas/types";
 import { renderScene } from "@/lib/canvas/renderer";
 import IslandToolbar from "./IslandToolbar";
 import ChatPanel from "./ChatPanel";
+import TutorOverlay from "./TutorOverlay";
+import VoiceTutor from "./VoiceTutor";
 
 // ── helpers (module‑level, no closures) ─────────────────────────────
 
@@ -30,7 +32,8 @@ function elementBounds(el: CanvasElement) {
     const pts = (el as LinearElement | FreedrawElement).points;
     if (!pts.length) return { x: el.x, y: el.y, w: 0, h: 0 };
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const [px, py] of pts) {
+    for (const p of pts) {
+      const [px, py] = pointXY(p);
       if (px < x0) x0 = px;
       if (py < y0) y0 = py;
       if (px > x1) x1 = px;
@@ -61,7 +64,9 @@ function cloneElements(els: CanvasElement[]): CanvasElement[] {
   return els.map((el) => {
     const copy = { ...el, style: { ...el.style } };
     if ("points" in el) {
-      (copy as any).points = (el as any).points.map((p: [number, number]) => [p[0], p[1]] as [number, number]);
+      (copy as any).points = (el as any).points.map((p: unknown) =>
+        Array.isArray(p) ? [p[0], p[1]] : { ...(p as object) },
+      );
     }
     return copy;
   });
@@ -109,6 +114,10 @@ export default function InfiniteCanvas() {
   const [tool, _setTool] = useState<Tool>("select");
   const [style, _setStyle] = useState<ElementStyle>({ ...DEFAULT_STYLE });
   const [zoom, setZoomUI] = useState(100);
+  // synced whenever the camera changes so DOM overlays tracking world
+  // coordinates (TutorOverlay) re-render with the new transform
+  const [camSnapshot, setCamSnapshot] = useState<Camera>({ x: 0, y: 0, zoom: 1 });
+  const bumpCam = useCallback(() => setCamSnapshot({ ...cameraRef.current }), []);
   const [chatOpen, setChatOpen] = useState(false);
   const [editingText, setEditingText] = useState<{ worldX: number; worldY: number; screenX: number; screenY: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -211,7 +220,7 @@ export default function InfiniteCanvas() {
         break;
       }
       case "freedraw": {
-        const el: FreedrawElement = { id: genId(), type: "freedraw", x: wp.x, y: wp.y, width: 0, height: 0, points: [[0, 0]], style: { ...styleRef.current }, isDeleted: false };
+        const el: FreedrawElement = { id: genId(), type: "freedraw", x: wp.x, y: wp.y, width: 0, height: 0, points: [{ x: 0, y: 0, t: performance.now() }], style: { ...styleRef.current }, isDeleted: false };
         elementsRef.current.push(el);
         curElRef.current = el;
         actionRef.current = { type: "drawing" };
@@ -242,6 +251,7 @@ export default function InfiniteCanvas() {
         x: act.startCam.x - (sp.x - act.startPtr.x) / cam.zoom,
         y: act.startCam.y - (sp.y - act.startPtr.y) / cam.zoom,
       };
+      bumpCam();
       render();
       return;
     }
@@ -258,7 +268,7 @@ export default function InfiniteCanvas() {
         const pts = (el as LinearElement).points;
         pts[pts.length - 1] = [wp.x - el.x, wp.y - el.y];
       } else if (el.type === "freedraw") {
-        (el as FreedrawElement).points.push([wp.x - el.x, wp.y - el.y]);
+        (el as FreedrawElement).points.push({ x: wp.x - el.x, y: wp.y - el.y, t: performance.now() });
       }
       render();
     } else if (act.type === "moving") {
@@ -284,7 +294,7 @@ export default function InfiniteCanvas() {
         if (el.type === "freedraw") {
           const pts = (el as FreedrawElement).points;
           let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-          for (const [px, py] of pts) { x0 = Math.min(x0, px); y0 = Math.min(y0, py); x1 = Math.max(x1, px); y1 = Math.max(y1, py); }
+          for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
           el.width = x1 - x0;
           el.height = y1 - y0;
         }
@@ -369,11 +379,12 @@ export default function InfiniteCanvas() {
       } else {
         cameraRef.current = { ...cam, x: cam.x + e.deltaX / cam.zoom, y: cam.y + e.deltaY / cam.zoom };
       }
+      bumpCam();
       render();
     };
     cvs.addEventListener("wheel", onWheel, { passive: false });
     return () => cvs.removeEventListener("wheel", onWheel);
-  }, [render]);
+  }, [render, bumpCam]);
 
   // keyboard shortcuts
   useEffect(() => {
@@ -426,8 +437,9 @@ export default function InfiniteCanvas() {
     const wc = screenToWorld(r.width / 2, r.height / 2, cam);
     cameraRef.current = { x: wc.x - r.width / 2 / nz, y: wc.y - r.height / 2 / nz, zoom: nz };
     setZoomUI(Math.round(nz * 100));
+    bumpCam();
     render();
-  }, [render]);
+  }, [render, bumpCam]);
 
   // ── cursor ──────────────────────────────────────────────────────
 
@@ -454,6 +466,9 @@ export default function InfiniteCanvas() {
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
       />
+
+      {/* ── tutor layer (recognized math + tutor annotations) ─── */}
+      <TutorOverlay camera={camSnapshot} />
 
       {/* ── island toolbar (top centre) ─── */}
       <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
@@ -524,6 +539,11 @@ export default function InfiniteCanvas() {
           <ChatPanel onClose={() => setChatOpen(false)} />
         </div>
       )}
+
+      {/* ── voice tutor (bottom-right) ── */}
+      <div className="pointer-events-auto absolute bottom-4 right-4">
+        <VoiceTutor />
+      </div>
 
       {/* ── zoom controls (bottom‑left) ── */}
       <div className="pointer-events-auto absolute bottom-4 left-4 flex items-center gap-1 rounded-lg bg-white/90 px-2 py-1 text-xs font-medium text-zinc-600 shadow ring-1 ring-black/5 backdrop-blur dark:bg-zinc-800/90 dark:text-zinc-300 dark:ring-white/10">

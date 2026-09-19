@@ -6,6 +6,7 @@ import type {
   ShapeElement,
   TextElement,
 } from "./types";
+import { pointXY } from "./types";
 
 const GRID_SIZE = 20;
 
@@ -188,15 +189,15 @@ function drawFreedraw(ctx: CanvasRenderingContext2D, el: FreedrawElement) {
   const pts = el.points;
   if (pts.length === 0) return;
   ctx.beginPath();
-  ctx.moveTo(el.x + pts[0][0], el.y + pts[0][1]);
+  ctx.moveTo(el.x + pts[0].x, el.y + pts[0].y);
   for (let i = 1; i < pts.length - 1; i++) {
-    const mx = (pts[i][0] + pts[i + 1][0]) / 2;
-    const my = (pts[i][1] + pts[i + 1][1]) / 2;
-    ctx.quadraticCurveTo(el.x + pts[i][0], el.y + pts[i][1], el.x + mx, el.y + my);
+    const mx = (pts[i].x + pts[i + 1].x) / 2;
+    const my = (pts[i].y + pts[i + 1].y) / 2;
+    ctx.quadraticCurveTo(el.x + pts[i].x, el.y + pts[i].y, el.x + mx, el.y + my);
   }
   if (pts.length > 1) {
     const last = pts[pts.length - 1];
-    ctx.lineTo(el.x + last[0], el.y + last[1]);
+    ctx.lineTo(el.x + last.x, el.y + last.y);
   }
   ctx.stroke();
 }
@@ -252,7 +253,8 @@ function normBounds(el: CanvasElement) {
       y0 = Infinity,
       x1 = -Infinity,
       y1 = -Infinity;
-    for (const [px, py] of pts) {
+    for (const p of pts) {
+      const [px, py] = pointXY(p);
       if (px < x0) x0 = px;
       if (py < y0) y0 = py;
       if (px > x1) x1 = px;

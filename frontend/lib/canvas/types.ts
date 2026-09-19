@@ -41,9 +41,26 @@ export interface LinearElement extends BaseElement {
   points: [number, number][];
 }
 
+/** A single sampled point of a hand-drawn stroke. `t` is an absolute
+ * millisecond reading from performance.now() taken at the pointer event,
+ * so recognizers can use intra- and inter-stroke timing. */
+export interface StrokePoint {
+  x: number;
+  y: number;
+  t: number;
+}
+
+/** Points on canvas elements: plain [x, y] tuples for lines/arrows,
+ * timestamped StrokePoints for freedraw strokes. */
+export type ElementPoint = [number, number] | StrokePoint;
+
+export function pointXY(p: ElementPoint): [number, number] {
+  return Array.isArray(p) ? p : [p.x, p.y];
+}
+
 export interface FreedrawElement extends BaseElement {
   type: "freedraw";
-  points: [number, number][];
+  points: StrokePoint[];
 }
 
 export interface TextElement extends BaseElement {
