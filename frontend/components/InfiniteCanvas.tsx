@@ -1,6 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+/* This canvas intentionally keeps its hot interaction state in refs. */
+/* eslint-disable react-hooks/refs */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import katex from "katex";
 import type {
   Camera,
   CanvasElement,
@@ -60,8 +64,8 @@ function hitTest(elements: CanvasElement[], wx: number, wy: number) {
 function cloneElements(els: CanvasElement[]): CanvasElement[] {
   return els.map((el) => {
     const copy = { ...el, style: { ...el.style } };
-    if ("points" in el) {
-      (copy as any).points = (el as any).points.map((p: [number, number]) => [p[0], p[1]] as [number, number]);
+    if ("points" in el && "points" in copy) {
+      copy.points = el.points.map((p) => [p[0], p[1]] as [number, number]);
     }
     return copy;
   });
@@ -75,6 +79,19 @@ type Action =
   | { type: "panning"; startCam: { x: number; y: number }; startPtr: { x: number; y: number } }
   | { type: "moving"; elementId: string; offset: { x: number; y: number } }
   | { type: "erasing" };
+
+interface LatexOverlay {
+  latex: string;
+  bounds: { x: number; y: number; w: number; h: number };
+}
+
+interface RecognitionPoint {
+  x: number;
+  y: number;
+  t: number;
+  p: number;
+  pointerType: string;
+}
 
 // ── colour / width presets ──────────────────────────────────────────
 
@@ -104,16 +121,36 @@ export default function InfiniteCanvas() {
 
   const historyRef = useRef<CanvasElement[][]>([[]]);
   const histIdxRef = useRef(0);
+  const hiddenMathIdsRef = useRef<Set<string>>(new Set());
+  const recognitionSocketRef = useRef<WebSocket | null>(null);
+  const recognitionConnectRef = useRef<Promise<WebSocket> | null>(null);
+  const recognitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recognitionRequestRef = useRef(0);
+  const recognitionStrokesRef = useRef<Record<string, RecognitionPoint[]>>({});
 
   // ── react state (synced for toolbar / overlays) ─────────────────
   const [tool, _setTool] = useState<Tool>("select");
   const [style, _setStyle] = useState<ElementStyle>({ ...DEFAULT_STYLE });
   const [zoom, setZoomUI] = useState(100);
   const [chatOpen, setChatOpen] = useState(false);
+  const [latexEnabled, setLatexEnabled] = useState(false);
+  const [latexOverlay, setLatexOverlay] = useState<LatexOverlay | null>(null);
+  const [recognizing, setRecognizing] = useState(false);
+  const [overlayVersion, setOverlayVersion] = useState(0);
+  const [overlayCamera, setOverlayCamera] = useState<Camera>({ x: 0, y: 0, zoom: 1 });
   const [editingText, setEditingText] = useState<{ worldX: number; worldY: number; screenX: number; screenY: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const setTool = useCallback((t: Tool) => { toolRef.current = t; _setTool(t); }, []);
+
+  // ── render ──────────────────────────────────────────────────────
+  const render = useCallback(() => {
+    const ctx = ctxRef.current;
+    const cvs = canvasRef.current;
+    if (!ctx || !cvs) return;
+    const dpr = window.devicePixelRatio || 1;
+    renderScene(ctx, cvs.width / dpr, cvs.height / dpr, elementsRef.current, selectedRef.current, cameraRef.current, darkRef.current, hiddenMathIdsRef.current);
+  }, []);
 
   const updateStyle = useCallback((u: Partial<ElementStyle>) => {
     const next = { ...styleRef.current, ...u };
@@ -123,17 +160,121 @@ export default function InfiniteCanvas() {
       if (selectedRef.current.has(el.id) && !el.isDeleted) Object.assign(el.style, u);
     }
     render();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [render]);
+
+  const currentMathBounds = useCallback(() => {
+    const math = elementsRef.current.filter((el): el is FreedrawElement => el.type === "freedraw" && !el.isDeleted);
+    if (math.length === 0) return null;
+    let x = Infinity, y = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const el of math) {
+      const bounds = elementBounds(el);
+      x = Math.min(x, bounds.x);
+      y = Math.min(y, bounds.y);
+      x1 = Math.max(x1, bounds.x + bounds.w);
+      y1 = Math.max(y1, bounds.y + bounds.h);
+    }
+    return { x, y, w: Math.max(x1 - x, 1), h: Math.max(y1 - y, 1) };
   }, []);
 
-  // ── render ──────────────────────────────────────────────────────
-  const render = useCallback(() => {
-    const ctx = ctxRef.current;
-    const cvs = canvasRef.current;
-    if (!ctx || !cvs) return;
-    const dpr = window.devicePixelRatio || 1;
-    renderScene(ctx, cvs.width / dpr, cvs.height / dpr, elementsRef.current, selectedRef.current, cameraRef.current, darkRef.current);
+  const clearRecognition = useCallback(() => {
+    recognitionRequestRef.current += 1;
+    hiddenMathIdsRef.current.clear();
+    setLatexOverlay(null);
+    setRecognizing(false);
+    render();
+  }, [render]);
+
+  const receiveRecognition = useCallback((event: MessageEvent<string>) => {
+    let message: { type?: string; requestId?: string; latex?: string; error?: string };
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      setRecognizing(false);
+      return;
+    }
+    if (message.requestId !== String(recognitionRequestRef.current)) return;
+    setRecognizing(false);
+    if (message.type === "error" || !message.latex) return;
+    const bounds = currentMathBounds();
+    if (!bounds) return;
+    hiddenMathIdsRef.current = new Set(
+      elementsRef.current
+        .filter((el) => el.type === "freedraw" && !el.isDeleted)
+        .map((el) => el.id),
+    );
+    setLatexOverlay({ latex: message.latex, bounds });
+    render();
+  }, [currentMathBounds, render]);
+
+  const connectRecognition = useCallback((): Promise<WebSocket> => {
+    const existing = recognitionSocketRef.current;
+    if (existing?.readyState === WebSocket.OPEN) return Promise.resolve(existing);
+    if (recognitionConnectRef.current) return recognitionConnectRef.current;
+
+    const configuredUrl = process.env.NEXT_PUBLIC_RECOGNIZER_WS_URL;
+    const url = configuredUrl ?? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:8000/ws/latex`;
+    recognitionConnectRef.current = new Promise((resolve, reject) => {
+      const socket = new WebSocket(url);
+      socket.onopen = () => {
+        recognitionSocketRef.current = socket;
+        recognitionConnectRef.current = null;
+        resolve(socket);
+      };
+      socket.onmessage = receiveRecognition;
+      socket.onerror = () => {
+        recognitionConnectRef.current = null;
+        setRecognizing(false);
+        reject(new Error("Recognition WebSocket connection failed"));
+      };
+      socket.onclose = () => {
+        if (recognitionSocketRef.current === socket) recognitionSocketRef.current = null;
+        recognitionConnectRef.current = null;
+        setRecognizing(false);
+      };
+    });
+    return recognitionConnectRef.current;
+  }, [receiveRecognition]);
+
+  const scheduleRecognition = useCallback(() => {
+    if (recognitionTimerRef.current) clearTimeout(recognitionTimerRef.current);
+    recognitionRequestRef.current += 1;
+    const requestId = String(recognitionRequestRef.current);
+    if (!latexEnabled) return;
+    const strokes = elementsRef.current
+      .filter((el): el is FreedrawElement => el.type === "freedraw" && !el.isDeleted)
+      .map((el) => recognitionStrokesRef.current[el.id] ?? el.points.map(([x, y], index): RecognitionPoint => ({
+        x: el.x + x,
+        y: el.y + y,
+        t: Date.now() + index,
+        p: 0.5,
+        pointerType: "mouse",
+      })));
+    if (strokes.length === 0) return;
+    setRecognizing(true);
+    recognitionTimerRef.current = setTimeout(() => {
+      void connectRecognition()
+        .then((socket) => socket.send(JSON.stringify({ requestId, strokes })))
+        .catch(() => setRecognizing(false));
+    }, 600);
+  }, [connectRecognition, latexEnabled]);
+
+  const toggleLatex = useCallback(() => {
+    if (latexEnabled) clearRecognition();
+    setLatexEnabled((enabled) => !enabled);
+  }, [clearRecognition, latexEnabled]);
+
+  useEffect(() => () => {
+    if (recognitionTimerRef.current) clearTimeout(recognitionTimerRef.current);
+    recognitionSocketRef.current?.close();
   }, []);
+
+  useEffect(() => {
+    if (!latexEnabled) {
+      recognitionSocketRef.current?.close();
+      return;
+    }
+    scheduleRecognition();
+  }, [latexEnabled, scheduleRecognition]);
 
   // ── history ─────────────────────────────────────────────────────
   const pushHistory = useCallback(() => {
@@ -148,6 +289,9 @@ export default function InfiniteCanvas() {
     histIdxRef.current--;
     elementsRef.current = cloneElements(historyRef.current[histIdxRef.current]);
     selectedRef.current.clear();
+    recognitionRequestRef.current += 1;
+    hiddenMathIdsRef.current.clear();
+    setLatexOverlay(null);
     render();
   }, [render]);
 
@@ -157,6 +301,9 @@ export default function InfiniteCanvas() {
     histIdxRef.current++;
     elementsRef.current = cloneElements(h[histIdxRef.current]);
     selectedRef.current.clear();
+    recognitionRequestRef.current += 1;
+    hiddenMathIdsRef.current.clear();
+    setLatexOverlay(null);
     render();
   }, [render]);
 
@@ -211,8 +358,16 @@ export default function InfiniteCanvas() {
         break;
       }
       case "freedraw": {
+        clearRecognition();
         const el: FreedrawElement = { id: genId(), type: "freedraw", x: wp.x, y: wp.y, width: 0, height: 0, points: [[0, 0]], style: { ...styleRef.current }, isDeleted: false };
         elementsRef.current.push(el);
+        recognitionStrokesRef.current[el.id] = [{
+          x: wp.x,
+          y: wp.y,
+          t: Date.now(),
+          p: e.pressure > 0 ? e.pressure : 0.5,
+          pointerType: e.pointerType || "mouse",
+        }];
         curElRef.current = el;
         actionRef.current = { type: "drawing" };
         break;
@@ -222,6 +377,7 @@ export default function InfiniteCanvas() {
         break;
       }
       case "eraser": {
+        clearRecognition();
         actionRef.current = { type: "erasing" };
         const hit = hitTest(elementsRef.current, wp.x, wp.y);
         if (hit) { hit.isDeleted = true; render(); }
@@ -242,6 +398,8 @@ export default function InfiniteCanvas() {
         x: act.startCam.x - (sp.x - act.startPtr.x) / cam.zoom,
         y: act.startCam.y - (sp.y - act.startPtr.y) / cam.zoom,
       };
+      setOverlayCamera(cameraRef.current);
+      setOverlayVersion((version) => version + 1);
       render();
       return;
     }
@@ -259,11 +417,19 @@ export default function InfiniteCanvas() {
         pts[pts.length - 1] = [wp.x - el.x, wp.y - el.y];
       } else if (el.type === "freedraw") {
         (el as FreedrawElement).points.push([wp.x - el.x, wp.y - el.y]);
+        const recognitionStroke = recognitionStrokesRef.current[el.id];
+        recognitionStroke?.push({
+          x: wp.x,
+          y: wp.y,
+          t: Date.now(),
+          p: e.pressure > 0 ? e.pressure : 0.5,
+          pointerType: e.pointerType || "mouse",
+        });
       }
       render();
     } else if (act.type === "moving") {
       const el = elementsRef.current.find((e) => e.id === act.elementId);
-      if (el) { el.x = wp.x + act.offset.x; el.y = wp.y + act.offset.y; render(); }
+      if (el) { el.x = wp.x + act.offset.x; el.y = wp.y + act.offset.y; setOverlayVersion((version) => version + 1); render(); }
     } else if (act.type === "erasing") {
       const hit = hitTest(elementsRef.current, wp.x, wp.y);
       if (hit && !hit.isDeleted) { hit.isDeleted = true; render(); }
@@ -298,10 +464,12 @@ export default function InfiniteCanvas() {
         if (el.type !== "freedraw") setTool("select");
       }
       curElRef.current = null;
+      if (el?.type === "freedraw" && !el.isDeleted) scheduleRecognition();
     }
 
     if (act.type === "moving" || act.type === "erasing") pushHistory();
     actionRef.current = { type: "none" };
+    setOverlayVersion((version) => version + 1);
     render();
   };
 
@@ -369,6 +537,7 @@ export default function InfiniteCanvas() {
       } else {
         cameraRef.current = { ...cam, x: cam.x + e.deltaX / cam.zoom, y: cam.y + e.deltaY / cam.zoom };
       }
+      setOverlayCamera(cameraRef.current);
       render();
     };
     cvs.addEventListener("wheel", onWheel, { passive: false });
@@ -425,9 +594,29 @@ export default function InfiniteCanvas() {
     const r = cvs.getBoundingClientRect();
     const wc = screenToWorld(r.width / 2, r.height / 2, cam);
     cameraRef.current = { x: wc.x - r.width / 2 / nz, y: wc.y - r.height / 2 / nz, zoom: nz };
+    setOverlayCamera(cameraRef.current);
     setZoomUI(Math.round(nz * 100));
     render();
   }, [render]);
+
+  const renderedLatex = useMemo(() => {
+    if (!latexOverlay?.latex) return null;
+    return katex.renderToString(latexOverlay.latex, {
+      displayMode: true,
+      throwOnError: false,
+      output: "html",
+    });
+  }, [latexOverlay]);
+
+  const latexPosition = latexOverlay
+      ? {
+        left: (latexOverlay.bounds.x - overlayCamera.x) * overlayCamera.zoom,
+        top: (latexOverlay.bounds.y - overlayCamera.y) * overlayCamera.zoom,
+        minWidth: Math.max(48, latexOverlay.bounds.w * overlayCamera.zoom),
+        minHeight: Math.max(32, latexOverlay.bounds.h * overlayCamera.zoom),
+      }
+    : undefined;
+  void overlayVersion;
 
   // ── cursor ──────────────────────────────────────────────────────
 
@@ -454,6 +643,30 @@ export default function InfiniteCanvas() {
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
       />
+
+      {renderedLatex && latexPosition && (
+        <div
+          className="pointer-events-none absolute z-10 flex items-center justify-center overflow-visible px-2 text-zinc-900 dark:text-zinc-100"
+          style={latexPosition}
+          dangerouslySetInnerHTML={{ __html: renderedLatex }}
+        />
+      )}
+
+      <div className="pointer-events-auto absolute right-4 top-4 flex items-center gap-2 rounded-xl bg-white/95 px-3 py-2 text-xs shadow-lg ring-1 ring-black/[.06] backdrop-blur dark:bg-zinc-800/95 dark:ring-white/10">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={latexEnabled}
+          onClick={toggleLatex}
+          className={`relative h-5 w-9 rounded-full transition-colors ${latexEnabled ? "bg-violet-600" : "bg-zinc-300 dark:bg-zinc-600"}`}
+          title="Toggle handwriting to LaTeX"
+        >
+          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${latexEnabled ? "translate-x-4" : "translate-x-0.5"}`} />
+        </button>
+        <span className="text-zinc-600 dark:text-zinc-300">
+          {recognizing ? "Recognizing..." : "Handwriting to LaTeX"}
+        </span>
+      </div>
 
       {/* ── island toolbar (top centre) ─── */}
       <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
