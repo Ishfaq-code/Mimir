@@ -78,8 +78,16 @@ type Action =
 
 // ── colour / width presets ──────────────────────────────────────────
 
-const STROKE_COLORS = ["#1e1e1e", "#e03131", "#e8590c", "#fcc419", "#2f9e44", "#1971c2", "#7048e8"];
-const FILL_COLORS = ["transparent", ...STROKE_COLORS.map((c) => c + "33")]; // 20 % opacity versions
+const STROKE_COLORS = [
+  { name: "Black", color: "#1e1e1e" },
+  { name: "White", color: "#ffffff" },
+  { name: "Red", color: "#e03131" },
+  { name: "Orange", color: "#e8590c" },
+  { name: "Yellow", color: "#fcc419" },
+  { name: "Green", color: "#2f9e44" },
+  { name: "Blue", color: "#1971c2" },
+  { name: "Purple", color: "#7048e8" },
+];
 const STROKE_WIDTHS = [1, 2, 4];
 
 // ═══════════════════════════════════════════════════════════════════
@@ -94,7 +102,7 @@ export default function InfiniteCanvas() {
   const elementsRef = useRef<CanvasElement[]>([]);
   const cameraRef = useRef<Camera>({ x: 0, y: 0, zoom: 1 });
   const selectedRef = useRef<Set<string>>(new Set());
-  const toolRef = useRef<Tool>("select");
+  const toolRef = useRef<Tool>("freedraw");
   const styleRef = useRef<ElementStyle>({ ...DEFAULT_STYLE });
   const darkRef = useRef(false);
 
@@ -106,7 +114,7 @@ export default function InfiniteCanvas() {
   const histIdxRef = useRef(0);
 
   // ── react state (synced for toolbar / overlays) ─────────────────
-  const [tool, _setTool] = useState<Tool>("select");
+  const [tool, _setTool] = useState<Tool>("freedraw");
   const [style, _setStyle] = useState<ElementStyle>({ ...DEFAULT_STYLE });
   const [zoom, setZoomUI] = useState(100);
   const [chatOpen, setChatOpen] = useState(false);
@@ -170,6 +178,7 @@ export default function InfiniteCanvas() {
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     canvasRef.current?.setPointerCapture(e.pointerId);
+    selectedRef.current.clear();
     const sp = screenPos(e);
     const cam = cameraRef.current;
     const wp = screenToWorld(sp.x, sp.y, cam);
@@ -293,9 +302,9 @@ export default function InfiniteCanvas() {
           const dx = pts[1][0] - pts[0][0], dy = pts[1][1] - pts[0][1];
           if (Math.abs(dx) < 2 && Math.abs(dy) < 2) el.isDeleted = true;
         }
-        if (!el.isDeleted) selectedRef.current = new Set([el.id]);
+        selectedRef.current.clear();
         pushHistory();
-        if (el.type !== "freedraw") setTool("select");
+        if (el.type !== "freedraw") setTool("freedraw");
       }
       curElRef.current = null;
     }
@@ -385,7 +394,7 @@ export default function InfiniteCanvas() {
       if (k === " ") { spaceRef.current = true; e.preventDefault(); return; }
 
       if (!e.ctrlKey && !e.metaKey) {
-        const map: Record<string, Tool> = { v: "select", "1": "select", h: "hand", "2": "hand", p: "freedraw", e: "eraser" };
+        const map: Record<string, Tool> = { p: "freedraw", "1": "freedraw", e: "eraser", "2": "eraser" };
         if (map[k]) { setTool(map[k]); return; }
       }
 
@@ -411,10 +420,11 @@ export default function InfiniteCanvas() {
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     darkRef.current = mq.matches;
+    updateStyle({ strokeColor: mq.matches ? "#ffffff" : DEFAULT_STYLE.strokeColor });
     const h = (e: MediaQueryListEvent) => { darkRef.current = e.matches; render(); };
     mq.addEventListener("change", h);
     return () => mq.removeEventListener("change", h);
-  }, [render]);
+  }, [render, updateStyle]);
 
   // ── zoom helpers for UI buttons ─────────────────────────────────
 
@@ -453,6 +463,7 @@ export default function InfiniteCanvas() {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        aria-label="Drawing canvas"
       />
 
       {/* ── island toolbar (top centre) ─── */}
@@ -465,18 +476,8 @@ export default function InfiniteCanvas() {
         <div>
           <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-zinc-400">Stroke</span>
           <div className="flex gap-1">
-            {STROKE_COLORS.map((c) => (
-              <button key={c} type="button" onClick={() => updateStyle({ strokeColor: c })} className={`h-5 w-5 rounded-full border-2 transition-transform hover:scale-110 ${style.strokeColor === c ? "border-blue-500 scale-110" : "border-zinc-200 dark:border-zinc-600"}`} style={{ backgroundColor: c }} />
-            ))}
-          </div>
-        </div>
-        <div>
-          <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-zinc-400">Fill</span>
-          <div className="flex gap-1">
-            {FILL_COLORS.map((c) => (
-              <button key={c} type="button" onClick={() => updateStyle({ fillColor: c })} className={`h-5 w-5 rounded-full border-2 transition-transform hover:scale-110 ${style.fillColor === c ? "border-blue-500 scale-110" : "border-zinc-200 dark:border-zinc-600"}`} style={{ backgroundColor: c === "transparent" ? undefined : c }}>
-                {c === "transparent" && (<svg viewBox="0 0 20 20" className="h-full w-full text-zinc-400"><line x1="3" y1="17" x2="17" y2="3" stroke="currentColor" strokeWidth="2" /></svg>)}
-              </button>
+            {STROKE_COLORS.map(({ name, color: c }) => (
+              <button key={c} type="button" title={`${name} ink`} aria-label={`${name} ink`} aria-pressed={style.strokeColor === c} onClick={() => updateStyle({ strokeColor: c })} className={`h-5 w-5 rounded-full border-2 transition-transform hover:scale-110 ${style.strokeColor === c ? "border-blue-500 scale-110" : "border-zinc-200 dark:border-zinc-600"}`} style={{ backgroundColor: c }} />
             ))}
           </div>
         </div>
