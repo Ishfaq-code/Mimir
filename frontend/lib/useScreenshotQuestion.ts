@@ -13,6 +13,7 @@ export function useScreenshotQuestion() {
   const [error, setError] = useState("");
   const [pasteError, setPasteError] = useState("");
   const [progress, setProgress] = useState(0);
+  const [voiceSession, setVoiceSession] = useState(0);
   const requestRef = useRef<AbortController | null>(null);
   const importVersion = useRef(0);
 
@@ -53,6 +54,7 @@ export function useScreenshotQuestion() {
       const source = await loadScreenshot(file);
       if (version !== importVersion.current) { URL.revokeObjectURL(source.url); return false; }
       setScreenshot(source);
+      setVoiceSession(value => value + 1);
       void read(source);
       return true;
     } catch (failure) {
@@ -64,6 +66,7 @@ export function useScreenshotQuestion() {
   const edit = () => {
     requestRef.current?.abort();
     setConfirmedQuestion(null);
+    setVoiceSession(value => value + 1);
     setPhase("review");
   };
   const confirm = () => {
@@ -76,6 +79,6 @@ export function useScreenshotQuestion() {
     return true;
   };
 
-  return { screenshot, phase, text, setText, error, pasteError, setPasteError, progress,
+  return { screenshot, phase, text, setText, error, pasteError, setPasteError, progress, voiceSession,
     importScreenshot, edit, confirm, retry: () => { if (screenshot) void read(screenshot); } };
 }

@@ -106,7 +106,7 @@ export default function PracticeWorkspace() {
             </form>}
             {question.phase === "confirmed" && <><div className="question-confirmed"><span><Icon name="check" size={15}/>Confirmed</span><button className="text-button" onClick={question.edit}>Edit</button></div><p className="question-text">{question.text}</p></>}
           </div>
-          <footer className="tutor-footer"><VoiceTutor key={`${question.screenshot?.id ?? "none"}-${question.phase}`}/></footer>
+          <footer className="tutor-footer"><VoiceTutor key={question.voiceSession}/></footer>
         </aside>
       </div>
     </div>

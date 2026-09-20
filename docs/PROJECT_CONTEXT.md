@@ -84,7 +84,7 @@ See [README.md](../README.md). Next.js 16.3.5 / React 19 / TypeScript, Tesseract
 - The current pipeline groups unrecognized strokes completed within the configured pause into one expression. It can retain multiple recognized overlays, but does not semantically segment lines, regions, or individual symbols.
 - Successful recognition hides only its source ink and overlays normalized KaTeX without deleting geometry. Disabling conversion restores all original ink.
 - Only confirmed screenshot text enters `CanvasState.question`; recognized student equations remain separate context. The store starts without fabricated student ink.
-- Changing or replacing a question clears stale recognized context and tutor annotations and disconnects the old voice component. Closing the sidebar preserves the voice session.
+- Editing or replacing a question clears stale recognized context and tutor annotations and disconnects the old voice component (a `voiceSession` counter in `useScreenshotQuestion` remounts `VoiceTutor`). Phase transitions during OCR review and confirmation keep the voice session alive, and closing the sidebar preserves it.
 - The agent currently has `get_canvas_state` and `write_latex`; other tools mentioned in its broader prompt/spec are not implemented yet.
 
 Screenshot OCR works without provider keys. Its lazy-loaded assets come from `/ocr/` on this app, generated before build/dev and excluded from Git, lint, and Docker input context. Docker's builder regenerates them and its runner serves them from public.

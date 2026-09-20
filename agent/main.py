@@ -3,6 +3,7 @@ import logging
 
 from livekit import agents
 from livekit.agents import AgentSession
+from livekit.agents.voice.agent_activity import ActivityClosedError
 from livekit.plugins import openai
 
 import config
@@ -23,10 +24,18 @@ async def greet(session: AgentSession) -> None:
 
     Without this, a greeting cancelled by turn detection (noise, echo,
     an eager student) leaves the agent silent in 'listening' forever.
+
+    A session closing mid-greeting (student disconnects) raises instead
+    of retrying into a dead session, so stop quietly rather than crash
+    the job task.
     """
     for attempt in range(3):
-        handle = session.generate_reply(instructions=GREETING_INSTRUCTIONS)
-        await handle.wait_for_playout()
+        try:
+            handle = session.generate_reply(instructions=GREETING_INSTRUCTIONS)
+            await handle.wait_for_playout()
+        except (RuntimeError, ActivityClosedError) as error:
+            logger.info("greeting skipped, session is closing: %s", error)
+            return
         if not handle.interrupted:
             return
         logger.info("greeting interrupted (attempt %d), retrying", attempt + 1)
