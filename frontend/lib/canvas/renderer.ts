@@ -30,6 +30,9 @@ export function renderScene(
   dark: boolean,
   hiddenIds: Set<string> = new Set(),
   screenshot: CanvasScreenshot | null = null,
+  selectedScreenshot = false,
+  marquee: { x: number; y: number; w: number; h: number } | null = null,
+  selectedLatexBounds: { x: number; y: number; w: number; h: number }[] = [],
 ) {
   ctx.save();
   ctx.clearRect(0, 0, width, height);
@@ -62,7 +65,24 @@ export function renderScene(
     drawSelection(ctx, el, camera.zoom);
   }
 
+  if (screenshot && selectedScreenshot) {
+    drawSelectionBox(ctx, screenshot.x, screenshot.y, screenshot.width, screenshot.height, camera.zoom);
+  }
+  for (const bounds of selectedLatexBounds) {
+    drawSelectionBox(ctx, bounds.x, bounds.y, bounds.w, bounds.h, camera.zoom);
+  }
+
   ctx.restore(); // camera
+  if (marquee) {
+    ctx.save();
+    ctx.fillStyle = "oklch(58% 0.12 250 / .12)";
+    ctx.strokeStyle = "#4f8ff7";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 4]);
+    ctx.fillRect(marquee.x, marquee.y, marquee.w, marquee.h);
+    ctx.strokeRect(marquee.x, marquee.y, marquee.w, marquee.h);
+    ctx.restore();
+  }
   ctx.restore(); // top‑level save
 }
 
@@ -236,6 +256,10 @@ function drawSelection(
   zoom: number,
 ) {
   const b = normBounds(el);
+  drawSelectionBox(ctx, b.x, b.y, b.w, b.h, zoom);
+}
+
+function drawSelectionBox(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, zoom: number) {
   const pad = 5 / zoom;
   const lw = 1.5 / zoom;
   const hs = 8 / zoom;
@@ -244,14 +268,14 @@ function drawSelection(
   ctx.strokeStyle = "#4f8ff7";
   ctx.lineWidth = lw;
   ctx.setLineDash([]);
-  ctx.strokeRect(b.x - pad, b.y - pad, b.w + pad * 2, b.h + pad * 2);
+  ctx.strokeRect(x - pad, y - pad, w + pad * 2, h + pad * 2);
 
   ctx.fillStyle = "#fff";
   for (const [hx, hy] of [
-    [b.x, b.y],
-    [b.x + b.w, b.y],
-    [b.x, b.y + b.h],
-    [b.x + b.w, b.y + b.h],
+    [x, y],
+    [x + w, y],
+    [x, y + h],
+    [x + w, y + h],
   ] as const) {
     ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
     ctx.strokeRect(hx - hs / 2, hy - hs / 2, hs, hs);

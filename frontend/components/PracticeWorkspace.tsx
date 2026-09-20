@@ -88,7 +88,7 @@ export default function PracticeWorkspace() {
           <Icon name="tutor" size={18}/><span>Tutor</span>{question.phase === "review" && <span className="review-dot"/>}
         </button>
         <main className="workspace-main" aria-label="Math workspace" inert={panelOpen && !wide}>
-          <InfiniteCanvas dark={dark} screenshot={question.screenshot} onPasteScreenshot={() => void pasteScreenshot()} />
+          <InfiniteCanvas dark={dark} screenshot={question.screenshot} />
           {question.pasteError && <div className="paste-notice" role="alert"><span>{question.pasteError}</span><button className="icon-button" aria-label="Dismiss paste message" onClick={() => setPasteError("")}><Icon name="close" size={16}/></button></div>}
         </main>
         <aside className="tutor-panel" id="tutor-panel" aria-label="Question and tutor" onKeyDown={event => { if (event.key === "Escape") closePanel(); }}>

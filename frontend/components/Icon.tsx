@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 
 const paths = {
   text: <><path d="M4 6V3h16v3M12 3v18m-4 0h8"/></>,
+  select: <><path d="m5 3 5.5 14 2.5-5 5-2.5L5 3Z"/><path d="m13 14 4 5"/></>,
   clipboard: <><rect x="5" y="5" width="14" height="16" rx="2"/><rect x="9" y="2" width="6" height="5" rx="1"/><path d="M9 12h6m-6 4h4"/></>,
   pen: <><path d="m4 20 4-1 12-12a2.1 2.1 0 0 0-3-3L5 16l-1 4Z"/><path d="m14 7 3 3M4 20h6"/></>,
   eraser: <><path d="m8 20-5-5a2 2 0 0 1 0-3l10-9a2 2 0 0 1 3 0l5 5a2 2 0 0 1 0 3l-9 9H8Z"/><path d="m8 8 9 9M12 20h9"/></>,
