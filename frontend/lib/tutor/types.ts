@@ -36,6 +36,10 @@ export interface CanvasState {
   question: { text: string; source: "screenshot"; confirmed: true } | null;
   equations: RecognizedEquation[];
   tutorAnnotations: TutorAnnotation[];
+  /** Lifecycle of the recognition pipeline (spec.md section 16):
+   * "idle" nothing recognized yet, "recognizing" in flight,
+   * "ok" fresh result available, "uncertain" last attempt failed. */
+  recognitionStatus: "idle" | "recognizing" | "ok" | "uncertain";
 }
 
 export interface CanvasResult {

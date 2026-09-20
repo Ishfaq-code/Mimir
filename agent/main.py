@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from livekit import agents
@@ -10,6 +11,27 @@ from tutor import MathTutor
 
 logger = logging.getLogger("mimir-tutor")
 logging.basicConfig(level=logging.INFO)
+
+GREETING_INSTRUCTIONS = (
+    "Greet the student briefly and ask what math problem they'd like "
+    "to work on. Keep it to one or two short spoken sentences."
+)
+
+
+async def greet(session: AgentSession) -> None:
+    """Greet, retrying if the student's mic interrupts the greeting.
+
+    Without this, a greeting cancelled by turn detection (noise, echo,
+    an eager student) leaves the agent silent in 'listening' forever.
+    """
+    for attempt in range(3):
+        handle = session.generate_reply(instructions=GREETING_INSTRUCTIONS)
+        await handle.wait_for_playout()
+        if not handle.interrupted:
+            return
+        logger.info("greeting interrupted (attempt %d), retrying", attempt + 1)
+        await asyncio.sleep(0.5)
+    logger.warning("greeting interrupted 3 times; giving up — student can still start")
 
 
 async def entrypoint(ctx: agents.JobContext):
@@ -29,12 +51,7 @@ async def entrypoint(ctx: agents.JobContext):
 
     await session.start(room=ctx.room, agent=MathTutor())
 
-    await session.generate_reply(
-        instructions=(
-            "Greet the student briefly and ask what math problem they'd like "
-            "to work on. Keep it to one or two short spoken sentences."
-        )
-    )
+    await greet(session)
 
 
 if __name__ == "__main__":

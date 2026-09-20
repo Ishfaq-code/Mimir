@@ -18,9 +18,14 @@ import type {
 import { DEFAULT_STYLE, pointXY } from "@/lib/canvas/types";
 import { renderScene, type CanvasScreenshot } from "@/lib/canvas/renderer";
 import type { Screenshot } from "@/lib/screenshot";
+import {
+  clearRecognizedEquations,
+  getEquations,
+  setRecognizedEquations,
+  setRecognitionStatus,
+} from "@/lib/tutor/store";
 import IslandToolbar from "./IslandToolbar";
 import Icon from "./Icon";
-import { setRecognizedWork } from "@/lib/tutor/store";
 import TutorOverlay from "./TutorOverlay";
 import CanvasTextEditor, { type TextDraft } from "./CanvasTextEditor";
 
@@ -230,7 +235,7 @@ export default function InfiniteCanvas({ dark, screenshot, onPasteScreenshot }: 
     setLatexOverlays({});
     setRecognizing(false);
     setRecognitionError(false);
-    setRecognizedWork(null);
+    clearRecognizedEquations();
     render();
   }, [render]);
 
@@ -245,6 +250,7 @@ export default function InfiniteCanvas({ dark, screenshot, onPasteScreenshot }: 
     if (message.type === "error" && !message.requestId) {
       setRecognizing(false);
       setRecognitionError(true);
+      setRecognitionStatus("uncertain");
       return;
     }
     const requestId = message.requestId ?? "";
@@ -254,6 +260,7 @@ export default function InfiniteCanvas({ dark, screenshot, onPasteScreenshot }: 
     setRecognizing(false);
     if (message.type === "error" || !message.latex) {
       setRecognitionError(true);
+      setRecognitionStatus("uncertain");
       return;
     }
     const elements = elementsRef.current.filter((el): el is FreedrawElement => strokeIds.includes(el.id) && el.type === "freedraw" && !el.isDeleted);
@@ -281,12 +288,18 @@ export default function InfiniteCanvas({ dark, screenshot, onPasteScreenshot }: 
       },
     }));
     setRecognitionError(false);
-    setRecognizedWork({
-      id: "student-work",
+    const equation = {
+      id: `student-work-${requestId}`,
       latex,
       boundingBox: { x: bounds.x, y: bounds.y, width: bounds.w, height: bounds.h },
       sourceStrokeIds: strokeIds,
-    });
+    };
+    setRecognizedEquations([
+      ...getEquations().filter((item) =>
+        item.id !== "practice-problem" && item.id !== equation.id
+      ),
+      equation,
+    ]);
     render();
   }, [render]);
 
@@ -337,11 +350,13 @@ export default function InfiniteCanvas({ dark, screenshot, onPasteScreenshot }: 
     const requestId = String(recognitionRequestRef.current);
     recognitionRequestStrokesRef.current[requestId] = strokeIds;
     setRecognizing(true);
+    setRecognitionStatus("recognizing");
     void connectRecognition()
       .then((socket) => socket.send(JSON.stringify({ requestId, strokeIds, strokes })))
       .catch(() => {
         setRecognizing(false);
         setRecognitionError(true);
+        setRecognitionStatus("uncertain");
       });
   }, [connectRecognition]);
 
@@ -412,7 +427,7 @@ export default function InfiniteCanvas({ dark, screenshot, onPasteScreenshot }: 
     recognitionRequestRef.current += 1;
     hiddenMathIdsRef.current.clear();
     setLatexOverlays({});
-    setRecognizedWork(null);
+    clearRecognizedEquations();
     syncScene();
     render();
   }, [render, syncScene]);
@@ -426,7 +441,7 @@ export default function InfiniteCanvas({ dark, screenshot, onPasteScreenshot }: 
     recognitionRequestRef.current += 1;
     hiddenMathIdsRef.current.clear();
     setLatexOverlays({});
-    setRecognizedWork(null);
+    clearRecognizedEquations();
     syncScene();
     render();
   }, [render, syncScene]);

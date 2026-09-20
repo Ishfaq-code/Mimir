@@ -4,9 +4,8 @@ import { useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 import katex from "katex";
 import type { Camera } from "@/lib/canvas/types";
-import { getEquations, getTutorAnnotations, subscribe } from "@/lib/tutor/store";
+import { getTutorAnnotations, subscribe } from "@/lib/tutor/store";
 
-const EQUATION_COLOR = "var(--ink)"; // renders as if it were student ink
 const TUTOR_COLOR = "var(--accent)"; // tutor annotations are visually distinct
 const BASE_FONT_SIZE = 34; // px at zoom = 1
 
@@ -23,10 +22,11 @@ function Katex({ latex, color }: { latex: string; color: string }) {
   );
 }
 
-/** Tutor-owned layer above the canvas: recognized equations + tutor
- * annotations, positioned in world coordinates via the camera. */
+/** Tutor-owned layer above the canvas: annotations written by the agent,
+ * positioned in world coordinates via the camera. Recognized student math
+ * is rendered by the canvas's own LaTeX overlay; the student's ink and the
+ * tutor's marks never mix. */
 export default function TutorOverlay({ camera }: { camera: Camera }) {
-  const equations = useSyncExternalStore(subscribe, getEquations, getEquations);
   const annotations = useSyncExternalStore(subscribe, getTutorAnnotations, getTutorAnnotations);
 
   const place = (wx: number, wy: number): CSSProperties => ({
@@ -39,13 +39,6 @@ export default function TutorOverlay({ camera }: { camera: Camera }) {
 
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      {equations.map((eq) =>
-        eq.boundingBox && eq.id !== "student-work" ? (
-          <div key={eq.id} style={place(eq.boundingBox.x, eq.boundingBox.y)}>
-            <Katex latex={eq.latex} color={EQUATION_COLOR} />
-          </div>
-        ) : null,
-      )}
       {annotations.map((a) => (
         <div key={a.id} style={place(a.x, a.y)}>
           <Katex latex={a.latex} color={TUTOR_COLOR} />

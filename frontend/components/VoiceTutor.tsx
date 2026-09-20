@@ -30,6 +30,9 @@ const STATUS_LABEL: Record<VoiceStatus, string> = {
   error: "Connection failed",
 };
 
+// verbose diagnostics while the voice slice stabilises — open devtools
+const log = (...args: unknown[]) => console.debug("[VoiceTutor]", ...args);
+
 /** Voice bar: connects the browser to the LiveKit room, publishes the mic,
  * plays the tutor's audio, and registers the canvas RPC methods. */
 export default function VoiceTutor() {
@@ -60,8 +63,10 @@ export default function VoiceTutor() {
 
   function watchAgent(p: RemoteParticipant) {
     if (!p.isAgent) return;
+    log("agent participant found:", p.identity, "state:", p.attributes["lk.agent.state"]);
     const apply = () => {
       const s = p.attributes["lk.agent.state"];
+      log("agent state ->", s);
       if (s === "listening" || s === "thinking" || s === "speaking") setStatus(s);
     };
     apply();
@@ -74,6 +79,7 @@ export default function VoiceTutor() {
     setError(null);
     try {
       const tokenUrl = process.env.NEXT_PUBLIC_TOKEN_URL ?? `${window.location.protocol}//${window.location.hostname}:8000`;
+      log("fetching token from", tokenUrl);
       const res = await fetch(`${tokenUrl}/token`);
       if (!res.ok) throw new Error("Voice is unavailable right now. Please try again.");
       const { token, url } = (await res.json()) as { token: string; url: string };
@@ -83,7 +89,8 @@ export default function VoiceTutor() {
       roomRef.current = room;
 
       // play the tutor's audio
-      room.on(RoomEvent.TrackSubscribed, (track) => {
+      room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+        log("track subscribed:", track.kind, "from", participant.identity);
         if (track.kind !== Track.Kind.Audio) return;
         const el = track.attach();
         audioElsRef.current.push(el);
@@ -96,12 +103,14 @@ export default function VoiceTutor() {
         }
       });
       room.on(RoomEvent.ConnectionStateChanged, (state) => {
+        log("connection state ->", state);
         if (state === ConnectionState.Connected) setStatus("listening");
         if (state === ConnectionState.Disconnected) setStatus("disconnected");
       });
 
       await room.connect(url, token);
       if (attempt !== connectAttemptRef.current) { await room.disconnect(); return; }
+      log("room connected as", room.localParticipant.identity);
 
       // the tutor draws via these RPC methods — register before it can call
       registerCanvasRpcs(room.localParticipant, tutorCanvas);
@@ -111,9 +120,11 @@ export default function VoiceTutor() {
       room.on(RoomEvent.ParticipantConnected, watchAgent);
 
       await room.localParticipant.setMicrophoneEnabled(true);
+      log("microphone enabled");
     } catch (e) {
       if (attempt !== connectAttemptRef.current) return;
       const msg = e instanceof Error ? e.message : String(e);
+      log("connect failed:", msg);
       await disconnect();
       setError(
         msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("notallowed")

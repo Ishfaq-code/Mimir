@@ -2,10 +2,14 @@ import type { CanvasState, RecognizedEquation, TutorAnnotation } from "./types";
 
 // The workspace supplies a confirmed screenshot question. No synthetic
 // student handwriting is rendered or reported to the tutor.
+type RecognitionStatus = CanvasState["recognitionStatus"];
+
+const PRACTICE_PROBLEM_ID = "practice-problem";
 let revision = 0;
 let equations: RecognizedEquation[] = [];
 let tutorAnnotations: TutorAnnotation[] = [];
 let question: CanvasState["question"] = null;
+let recognitionStatus: RecognitionStatus = "idle";
 
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
@@ -28,7 +32,33 @@ export function getTutorAnnotations(): TutorAnnotation[] {
 }
 
 export function getCanvasState(): CanvasState {
-  return { revision, question, equations, tutorAnnotations };
+  return { revision, question, equations, tutorAnnotations, recognitionStatus };
+}
+
+/** Recognition pipeline → tutor context (spec.md section 5.2). */
+export function setRecognizedEquations(next: RecognizedEquation[]): void {
+  const practiceProblem = equations.filter((item) => item.id === PRACTICE_PROBLEM_ID);
+  equations = [
+    ...practiceProblem,
+    ...next.filter((item) => item.id !== PRACTICE_PROBLEM_ID),
+  ];
+  recognitionStatus = "ok";
+  revision += 1;
+  emit();
+}
+
+export function clearRecognizedEquations(): void {
+  equations = equations.filter((item) => item.id === PRACTICE_PROBLEM_ID);
+  recognitionStatus = "idle";
+  revision += 1;
+  emit();
+}
+
+export function setRecognitionStatus(status: RecognitionStatus): void {
+  if (status === recognitionStatus) return;
+  recognitionStatus = status;
+  revision += 1;
+  emit();
 }
 
 export function addTutorAnnotation(annotation: TutorAnnotation): void {
@@ -48,6 +78,16 @@ export function setConfirmedQuestion(text: string | null): void {
   question = text ? { text, source: "screenshot", confirmed: true } : null;
   equations = [];
   tutorAnnotations = [];
+  recognitionStatus = "idle";
+  revision += 1;
+  emit();
+}
+
+/** Current practice problem is known context, not recognized student ink. */
+export function setPracticeProblem(latex: string): void {
+  equations = [{ id: PRACTICE_PROBLEM_ID, latex }];
+  tutorAnnotations = [];
+  recognitionStatus = "idle";
   revision += 1;
   emit();
 }
