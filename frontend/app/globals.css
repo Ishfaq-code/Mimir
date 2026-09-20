@@ -184,9 +184,14 @@ button { transition: background-color 160ms ease-out, color 160ms ease-out, opac
 @media(max-width:600px) { .visualize-backdrop { padding:12px; } }
 .graph-overlay { position:absolute; z-index:20; border:1px solid var(--line); border-radius:12px; background:var(--paper); box-shadow:var(--elevated); overflow:hidden; pointer-events:auto; touch-action:none; transform:scale(0); opacity:0; transform-origin:top left; transition:transform 400ms cubic-bezier(.34,1.56,.64,1), opacity 250ms ease-out; }
 .graph-overlay-visible { transform:scale(1); opacity:1; }
-.graph-overlay-header { display:flex; align-items:center; justify-content:space-between; padding:6px 8px 6px 14px; border-bottom:1px solid var(--line); background:var(--surface); cursor:grab; user-select:none; flex:none; }
+.graph-overlay-header { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 8px 6px 14px; border-bottom:1px solid var(--line); background:var(--surface); cursor:grab; user-select:none; flex:none; }
 .graph-overlay-header:active { cursor:grabbing; }
 .graph-overlay-title { font-size:10px; font-weight:600; color:var(--muted); letter-spacing:.05em; text-transform:uppercase; }
+.graph-overlay-heading { display:flex; align-items:center; gap:10px; min-width:0; overflow:hidden; }
+.graph-overlay-legend { display:flex; align-items:center; gap:8px; min-width:0; overflow:hidden; color:var(--muted); font-size:10px; }
+.graph-overlay-legend-item { display:flex; align-items:center; gap:4px; min-width:0; white-space:nowrap; }
+.graph-overlay-legend-item > span:last-child { overflow:hidden; text-overflow:ellipsis; }
+.graph-overlay-legend-dot { width:7px; height:7px; flex:none; border-radius:50%; }
 .graph-canvas { display:block; width:100%; background:transparent; }
 .graph-slider-bar { display:flex; flex-wrap:wrap; gap:6px 14px; padding:8px 14px; border-top:1px solid var(--line); background:var(--surface); flex:none; }
 .graph-slider { display:flex; align-items:center; gap:6px; font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
