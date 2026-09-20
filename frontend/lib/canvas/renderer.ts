@@ -33,6 +33,7 @@ export function renderScene(
   selectedScreenshot = false,
   marquee: { x: number; y: number; w: number; h: number } | null = null,
   selectedLatexBounds: { x: number; y: number; w: number; h: number }[] = [],
+  latexStrokeIds: Set<string> = new Set(),
 ) {
   ctx.save();
   ctx.clearRect(0, 0, width, height);
@@ -61,7 +62,7 @@ export function renderScene(
   }
 
   for (const el of elements) {
-    if (el.isDeleted || !selectedIds.has(el.id)) continue;
+    if (el.isDeleted || !selectedIds.has(el.id) || latexStrokeIds.has(el.id)) continue;
     drawSelection(ctx, el, camera.zoom);
   }
 
