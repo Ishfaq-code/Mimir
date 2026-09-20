@@ -1,12 +1,14 @@
 # Product: Mimir
 
-## Register
+<!-- impeccable:product-schema 1 -->
 
-product
+## Platform
+
+web
 
 ## Users
 
-Students practicing math after class, primarily on an iPad with an Apple Pencil. They have already been introduced to a topic and need help applying it independently. The immediate demo focuses on basic algebra.
+Students practicing math after class, primarily on an iPad with an Apple Pencil. They have already been introduced to a topic and need help applying it independently. The current demo covers basic algebra tutoring and API-driven single-object kinematics visualizations.
 
 The student writes freely, makes mistakes, asks questions aloud, and continues solving. Teachers are a possible later audience for a report about where students struggle; that report is outside the first working demo.
 
@@ -14,9 +16,21 @@ The student writes freely, makes mistakes, asks questions aloud, and continues s
 
 A live AI tutor that follows handwritten work on an infinite canvas, talks with the student, and points to the exact part of the work it is discussing. The student should feel able to keep thinking and writing while help is available beside them.
 
-Success for the demo means the student can work through a pasted algebra question, ask for help, receive a useful spoken hint tied to their handwriting, correct a mistake, and reach the answer. Real recognition and tutor responses are required before describing that complete experience as implemented.
+Success for the demo means the student can work through a pasted algebra question, ask for help, receive a useful spoken hint tied to their handwriting, correct a mistake, and reach the answer. For kinematics, success means pasting a problem, selecting it, and exploring a matching visualization with playback and timeline controls. Real recognition and tutor responses are required before describing the complete live tutoring experience as implemented.
 
-## Confirmed Requirements
+## Positioning
+
+Mimir combines a handwriting-first workspace with conversational tutoring and problem-linked motion visualizations. Students bring their own problems; the tutor should connect guidance to their work, while the visualization API interprets the given quantities and validated physics calculates motion. No competitive superiority or uniqueness claim has been established.
+
+## Operating Context
+
+The primary setting is independent practice after class on an iPad with Apple Pencil, delivered through a web app. A student can paste a screenshot, review and correct its OCR text, and confirm it as tutor context. They can also paste plain text onto the canvas, select its textbox, and choose Visualize; a selected screenshot uses its confirmed question.
+
+Visualizations open in a modal and start playing automatically. Play/Pause, Forward, Backward, and the timeline support inspection. Closing the modal returns to the canvas. Keep the interface focused on the problem and controls, without the removed Kinematics heading or scope paragraph.
+
+The current hackathon visit is held in memory: reload loses drawings and questions. Replacing a screenshot preserves ink but clears question confirmation and ends voice. Closing the tutor panel retains its state and voice session. Provider secrets stay on the server; local screenshot OCR requires no provider key. Every submitted visualization problem uses the configured API, including demo examples.
+
+## Capabilities and Constraints
 
 | Area | User's direction |
 | --- | --- |
@@ -28,12 +42,12 @@ Success for the demo means the student can work through a pasted algebra questio
 | Guidance | A short question or hint connected to the relevant handwritten expression. |
 | Annotation | Circle/highlight the relevant ink; the user suggested a glow lasting about three seconds while the tutor speaks. |
 | Demonstration | Explain step by step when needed; tutor-written math should appear to draw itself. |
-| Problem source | Paste a screenshot onto the canvas. OCR it, ask the student to confirm or correct the question, and tutor only from the confirmed text. Other input methods come later. |
+| Problem source | Paste a screenshot onto the canvas. OCR it, ask the student to confirm or correct the question, and use only confirmed screenshot text as problem context for the tutor. Plain-text paste creates a selectable canvas textbox for visualization. |
 | Completion | Help the student reach a correct answer. |
 | Constraints | Fast hackathon iteration, reuse existing tools/APIs when useful, approximately $20 total API budget. |
-| Kinematics practice | Generate single-object questions with matching, validated visualizations: speeding up, braking to rest, constant speed, and downward free fall. Multiple bodies, collisions, direction reversals, and unknown launch-speed constraints are outside this visualization scope. |
+| Kinematics visualization | Interpret pasted single-object problems through an API and calculate matching, validated visualizations: speeding up, braking to rest, constant speed, and downward free fall. Multiple bodies, collisions, direction reversals, and unknown launch-speed constraints are outside this visualization scope. |
 
-Students may also paste a plain-text problem onto the canvas, select its textbox, and open Visualize. Premade kinematics questions are copyable demo material, not a question selector. The screenshot flow supersedes the earlier preset algebra questions. The user explicitly added generated kinematics practice on 2026-09-20, retained as copyable demo questions. Keep interface copy limited to necessary controls, review prompts, and actionable status/errors. Typing is allowed for OCR corrections and optional canvas textboxes. Freehand math remains the main solving interaction.
+Students may also paste a plain-text problem onto the canvas, select its textbox, and open Visualize. Kinematics visualization uses an API to interpret each pasted problem, including the copyable demo examples. Examples guide interpretation rather than trigger pre-programmed answers; validated physics calculates the frames. Premade kinematics questions are copyable demo material, not a question selector. The screenshot flow supersedes the earlier preset algebra questions. Keep interface copy limited to necessary controls, review prompts, and actionable status/errors. Typing is allowed for OCR corrections and optional canvas textboxes. Freehand math remains the main solving interaction.
 
 The original time budget was 24 hours. That was a historical constraint, not a live countdown. No sponsor requirements were specified.
 
@@ -44,7 +58,7 @@ The original time budget was 24 hours. That was a historical constraint, not a l
 - If the student asks “I'm confused, where do I go from here?”, use the actual current work to give the next useful hint.
 - If hints are insufficient, demonstrate a step with visible drawing. The user explicitly permits step-by-step demonstrations; do not impose an absolute ban on showing an answer.
 
-## Brand Personality
+## Brand Commitments
 
 The name in the current repository is **Mimir**. An earlier separate prototype was called Margin; its name and behavior do not automatically carry into this app.
 
@@ -60,13 +74,21 @@ The user's examples establish a conversational, guiding tutor voice: brief quest
 
 These are product constraints from the conversation, not a newly imposed aesthetic brief.
 
-## Design Principles
+## Product Principles
 
 1. **Protect the writing flow.** Keep ink responsive, retain the selected pen, and let the canvas remain the main workspace.
 2. **Connect speech to visible work.** A hint should identify the expression it refers to instead of making the student search for context.
 3. **Intervene with evidence.** A partial expression or uncertain recognition is not proof of a mathematical error. Distinguishing those cases is a requirement for the future tutor integration.
 4. **Teach through the next step.** Ask a useful question, then increase support when the student remains stuck.
-5. **Make the demo's core loop work first.** Favor a small reliable algebra experience before reports, broad subject coverage, or extensive editor features.
+5. **Make the demo's core loop work first.** Prioritize reliable algebra tutoring and the confirmed kinematics visualization flow before reports, broader subject coverage, or extensive editor features.
+
+## Evidence on Hand
+
+- [Demo problems](docs/DEMO_PROBLEMS.md) provide copyable kinematics examples. They guide evaluation and interpretation, not preset matching.
+- [Implementation and verification record](docs/PROJECT_CONTEXT.md) distinguishes shipped behavior, tested integrations, and known gaps. It records successful live visualization API checks and desktop browser playback checks; these do not establish physical iPad/Pencil or complete live tutor validation.
+- [Run instructions](README.md) document the working web application and provider configuration.
+- The teaching examples above capture the requested tutoring behavior. They are requirements, not proof that proactive tutoring is fully implemented.
+- No testimonials, adoption metrics, formal accessibility certification, or comparative benchmarks have been supplied. Do not invent them.
 
 ## Accessibility & Inclusion
 

@@ -14,6 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from livekit import api
 from pydantic import BaseModel, Field, model_validator
 
+from kinematics_prompt import extraction_messages
+
 load_dotenv()
 
 MYSCRIPT_URL = "https://cloud.myscript.com/api/v4.0/iink/recognize"
@@ -38,7 +40,7 @@ class VisualizationRequest(BaseModel):
 KINEMATICS_SCOPE = (
     "Visualizations support one object moving in one direction with constant acceleration, "
     "including braking to rest and downward free fall. Collisions, multiple objects, "
-    "and unknown launch-speed constraints are not supported. Try a generated kinematics question."
+    "and unknown launch-speed constraints are not supported. Select a single-object problem with a known initial speed and enough motion values."
 )
 
 
@@ -48,6 +50,7 @@ class PhysicsQuantity(BaseModel):
 
 
 class PhysicsExtraction(BaseModel):
+    object_label: str = Field(default="object", min_length=1, max_length=18)
     motion_type: Literal["constant_acceleration_1d", "free_fall_1d"]
     initial_velocity: PhysicsQuantity | None = None
     final_velocity: PhysicsQuantity | None = None
@@ -195,17 +198,15 @@ def health_check() -> dict[str, str]:
 
 @app.post("/visualize", response_model=VisualizationResponse)
 async def create_visualization(request: VisualizationRequest) -> VisualizationResponse:
-    # Stable demo questions can be pasted and rendered without a provider call.
-    normalized = " ".join(request.problem.split())
-    for kind in ("speed_up", "braking", "constant_speed", "free_fall"):
-        demo = generate_kinematics_question(kind, random.Random(42))
-        if normalized == " ".join(demo.problem.split()):
-            return demo.visualization
     if not is_openrouter_visualization_configured():
         raise HTTPException(status_code=503, detail="OpenRouter visualization is not configured on the backend")
     try:
         extraction = await extract_physics(request)
         return build_visualization(extraction)
+    except UnsupportedProblem as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except InvalidExtraction:
+        raise HTTPException(status_code=502, detail="The visualization provider returned an unreadable result. Try again.")
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail="The visualization provider is unavailable")
     except (ValueError, TypeError):
@@ -308,43 +309,22 @@ def is_openrouter_visualization_configured() -> bool:
     )
 
 
+class UnsupportedProblem(ValueError):
+    pass
+
+
+class InvalidExtraction(ValueError):
+    pass
+
+
 async def extract_physics(request: VisualizationRequest) -> PhysicsExtraction:
     model = os.getenv("OPENROUTER_VISUALIZATION_MODEL", "inclusionai/ling-3.0-flash-vl:free")
-    prompt = f"""
-Extract the known values from this single-object Kinematics word problem so a deterministic backend can solve it.
-Topic: One-dimensional kinematics
-Problem provided by the user:
-<problem>
-{request.problem}
-</problem>
-
-Return only valid JSON with this exact shape:
-{{
-  "motion_type": "constant_acceleration_1d",
-  "initial_velocity": null,
-  "final_velocity": null,
-  "displacement": null,
-  "duration": null,
-  "acceleration": null
-}}
-
-Rules:
-- If the problem involves multiple moving objects, collisions, a change of direction, variable acceleration, forces/energy, two-dimensional motion, or an unknown initial velocity, return {{"motion_type": "unsupported"}}. Never simplify such a problem into a single falling object.
-- Every known quantity must be an object with a numeric `value` and its `unit`, for example {{"value": 2, "unit": "m/s^2"}}. Unknown quantities must be null.
-- Extract values explicitly stated or directly implied by the problem. Use zero for "dropped" or "from rest", unless an explicit initial velocity is also provided; the explicit value wins.
-- Map a stated height to displacement. Map "acceleration of gravity" or a planet's gravity to acceleration.
-- Use `free_fall_1d` for dropped/falling objects and `constant_acceleration_1d` for other one-dimensional uniform acceleration.
-- `motion_type` must be exactly `constant_acceleration_1d` or `free_fall_1d`.
-- Preserve the units from the problem. Do not calculate acceleration, duration, positions, or frames.
-- Use null for quantities that are not given. Do not invent mass, force, or energy.
-- This first pipeline supports one-dimensional constant-acceleration motion only.
-- Use the direction of motion as positive. For downward free fall, velocity, displacement and gravity are positive. For braking, acceleration is negative. Only use gravity when its value is stated.
-""".strip()
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": extraction_messages(request.problem),
         "stream": False,
-        "temperature": 0.2,
+        "temperature": 0,
+        "max_tokens": 800,
     }
     async with httpx.AsyncClient(timeout=45) as client:
         response = await client.post(
@@ -356,7 +336,10 @@ Rules:
             json=payload,
         )
         response.raise_for_status()
-        body = response.json()
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise InvalidExtraction("Invalid provider response") from exc
 
     try:
         text = find_openrouter_text(body)
@@ -364,7 +347,12 @@ Rules:
             raise ValueError("OpenRouter did not return extraction text")
         result = json.loads(strip_json_fence(text))
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise ValueError("OpenRouter did not return extraction JSON") from exc
+        raise InvalidExtraction("OpenRouter did not return extraction JSON") from exc
+    if not isinstance(result, dict):
+        raise InvalidExtraction("Expected an extraction object")
+    if result.get("status") == "unsupported" or result.get("motion_type") == "unsupported":
+        reason = result.get("reason")
+        raise UnsupportedProblem(reason[:400] if isinstance(reason, str) and reason.strip() else KINEMATICS_SCOPE)
     return PhysicsExtraction.model_validate(result)
 
 
@@ -453,7 +441,7 @@ def build_visualization(extraction: PhysicsExtraction) -> VisualizationResponse:
             ball_y = 70 + position / displacement * 290
             objects = [
                 VisualizationObject(id="ground", type="line", x=240, y=374, x2=550, y2=374, color="#8a938d"),
-                VisualizationObject(id="ball", type="circle", x=360, y=ball_y, radius=14, color="#2f9e44", label="ball"),
+                VisualizationObject(id="ball", type="circle", x=360, y=ball_y, radius=14, color="#2f9e44", label=extraction.object_label),
                 VisualizationObject(id="acceleration", type="arrow", x=480, y=ball_y, x2=480, y2=ball_y + 45, color="#e8590c", label="a"),
             ]
             if velocity > 1e-9:
@@ -461,7 +449,7 @@ def build_visualization(extraction: PhysicsExtraction) -> VisualizationResponse:
         else:
             objects = [
                 VisualizationObject(id="ground", type="line", x=70, y=320, x2=760, y2=320, color="#8a938d"),
-                VisualizationObject(id="truck", type="rect", x=truck_x, y=270, width=76, height=42, color="#2f9e44", label="truck"),
+                VisualizationObject(id="truck", type="rect", x=truck_x, y=270, width=76, height=42, color="#2f9e44", label=extraction.object_label),
             ]
             if velocity > 1e-9:
                 objects.append(VisualizationObject(id="velocity", type="arrow", x=arrow_start, y=250, x2=arrow_start + arrow_length, y2=250, color="#1971c2", label="v"))
@@ -524,6 +512,7 @@ def generate_kinematics_question(kind: KinematicsKind, rng: random.Random | None
     else:
         raise ValueError("Unsupported kinematics question kind")
     extraction = PhysicsExtraction.model_validate({
+        "object_label": "ball" if kind == "free_fall" else "truck",
         "motion_type": motion_type,
         "initial_velocity": initial_velocity,
         "acceleration": acceleration,
@@ -544,7 +533,7 @@ def find_openrouter_text(value: Any) -> str | None:
     if isinstance(value, dict):
         choices = value.get("choices")
         if isinstance(choices, list) and choices:
-            message = choices[0].get("message")
+            message = choices[0].get("message") if isinstance(choices[0], dict) else None
             if isinstance(message, dict) and isinstance(message.get("content"), str):
                 return message["content"]
     elif isinstance(value, list):

@@ -203,11 +203,9 @@ export default function PracticeWorkspace() {
         </aside>
       </div>
       {visualizationOpen && <div className="visualize-backdrop" role="presentation" onMouseDown={closeVisualization}>
-        <section ref={visualizationDialogRef} tabIndex={-1} className="visualize-modal" role="dialog" aria-modal="true" aria-labelledby="visualize-title" onMouseDown={event => event.stopPropagation()}>
-          <div className="visualize-heading"><h2 id="visualize-title">Kinematics</h2><button className="icon-button" type="button" onClick={closeVisualization} aria-label="Close visualization"><Icon name="close" size={18}/></button></div>
+        <section ref={visualizationDialogRef} tabIndex={-1} className="visualize-modal" role="dialog" aria-modal="true" aria-label="Problem visualization" onMouseDown={event => event.stopPropagation()}>
+          <div className="visualize-heading">{visualizationProblem && <div className="visualize-problem"><p>{visualizationProblem}</p></div>}<button className="icon-button" type="button" onClick={closeVisualization} aria-label="Close visualization"><Icon name="close" size={18}/></button></div>
           <div className="visualize-body">
-            <p className="visualize-scope">One object, constant acceleration. Practice speeding up, braking, constant speed, or free fall.</p>
-            {visualizationProblem && <div className="visualize-problem"><span className="eyebrow">YOUR QUESTION</span><p>{visualizationProblem}</p></div>}
             {visualizationStatus === "loading" && <div className="visualize-loading" role="status"><span className="review-dot"/>Building the visualization…</div>}
             {visualizationStatus === "error" && <div className="visualize-error" role="alert"><p>{visualizationError}</p>{visualizationProblem && <button className="primary-button" type="button" onClick={() => void requestVisualization(visualizationProblem)}>Try again</button>}</div>}
             {visualizationStatus === "success" && visualization && <VisualizationResult key={visualizationRevision} data={visualization}/>}

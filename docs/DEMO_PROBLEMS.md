@@ -1,6 +1,6 @@
 # Demo problems
 
-Copy a paragraph, paste it onto the canvas with Ctrl+V / ⌘V, click the pasted textbox with Select, then click Visualize. These exact examples (including changes to whitespace) work without an API key. Other single-object kinematics problems use the configured OpenRouter provider.
+Copy a paragraph, paste it onto the canvas with Ctrl+V / ⌘V, click the pasted textbox with Select, then click Visualize. These are examples, not special cases: every problem uses the configured OpenRouter API. Change the numbers, wording, or object to explore another single-object kinematics problem. The model extracts the given values; validated equations produce the frames.
 
 ## Speeding up
 

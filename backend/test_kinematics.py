@@ -29,17 +29,50 @@ def solve(**knowns):
 
 
 class KinematicsTests(unittest.TestCase):
-    def test_pasted_demo_questions_without_provider(self):
-        with patch("main.is_openrouter_visualization_configured", return_value=False), patch("main.extract_physics", new_callable=AsyncMock) as extract:
+    def test_demo_questions_require_provider(self):
+        with patch("main.is_openrouter_visualization_configured", return_value=False):
             client = TestClient(app)
-            for kind in ("speed_up", "braking", "constant_speed", "free_fall"):
-                demo = generate_kinematics_question(kind, random.Random(42))
-                response = client.post("/visualize", json={"topic": "kinematics", "problem": "\n".join(demo.problem.split())})
-                self.assertEqual(response.status_code, 200)
-                self.assertEqual(response.json(), demo.visualization.model_dump())
-            response = client.post("/visualize", json={"topic": "kinematics", "problem": "A different problem"})
+            demo = generate_kinematics_question("speed_up", random.Random(42))
+            response = client.post("/visualize", json={"topic": "kinematics", "problem": demo.problem})
             self.assertEqual(response.status_code, 503)
-            extract.assert_not_called()
+
+    def test_api_extraction_drives_demo_and_novel_problem(self):
+        import httpx
+        extraction = {"status": "supported", "object_label": "train", "motion_type": "constant_acceleration_1d",
+                      "initial_velocity": {"value": 36, "unit": "km/h"}, "acceleration": 0,
+                      "duration": {"value": 2, "unit": "min"}}
+        response = httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(extraction)}}]},
+                                  request=httpx.Request("POST", "https://openrouter.ai"))
+        with patch("main.is_openrouter_visualization_configured", return_value=True), \
+             patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}), \
+             patch("main.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response) as post:
+            for problem in (generate_kinematics_question("speed_up", random.Random(42)).problem,
+                            "A train travels at 36 km/h for two minutes at constant speed."):
+                result = TestClient(app).post("/visualize", json={"topic": "kinematics", "problem": problem})
+                self.assertEqual(result.status_code, 200, result.text)
+                values = {v["name"]: v["value"] for v in result.json()["frames"][-1]["variables"]}
+                self.assertEqual(values, {"t": 120, "x": 1200, "v": 10, "a": 0})
+                self.assertEqual(result.json()["frames"][0]["objects"][1]["label"], "train")
+                messages = post.call_args.kwargs["json"]["messages"]
+                self.assertEqual(messages[-1], {"role": "user", "content": problem})
+                self.assertEqual(messages[0]["role"], "system")
+            self.assertEqual(post.await_count, 2)
+
+    def test_provider_failures_and_unsupported_reasons(self):
+        import httpx
+        cases = [
+            ({"choices": [{"message": {"content": "not JSON"}}]}, 502, "unreadable"),
+            ({"choices": [None]}, 502, "unreadable"),
+            ({"choices": [{"message": {"content": json.dumps({"status": "unsupported", "reason": "Please supply the initial speed."})}}]}, 422, "initial speed"),
+        ]
+        for body, status, detail in cases:
+            response = httpx.Response(200, json=body, request=httpx.Request("POST", "https://openrouter.ai"))
+            with patch("main.is_openrouter_visualization_configured", return_value=True), \
+                 patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}), \
+                 patch("main.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response):
+                result = TestClient(app).post("/visualize", json={"topic": "kinematics", "problem": "A moving object"})
+                self.assertEqual(result.status_code, status)
+                self.assertIn(detail, result.json()["detail"])
 
     def test_generated_text_and_frames_agree(self):
         # Check varied generated numbers against independently solved problem text.
