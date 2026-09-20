@@ -59,7 +59,7 @@ npm ci
 npm run dev
 ```
 
-The backend may keep running in Docker. The frontend uses `/token` for voice and `/ws/latex` for the optional Typeset math switch. `NEXT_PUBLIC_TOKEN_URL` and `NEXT_PUBLIC_RECOGNIZER_WS_URL` override their endpoints. Defaults target the current browser hostname on port 8000. The backend currently allows HTTP CORS from `localhost:3000`; configure the origin when serving the frontend on another address.
+The backend may keep running in Docker. The frontend uses `/token` for voice and `/ws/latex` for the optional Typeset math switch. `NEXT_PUBLIC_TOKEN_URL` and `NEXT_PUBLIC_RECOGNIZER_WS_URL` override their endpoints. Defaults target the current browser hostname on port 8000. `NEXT_PUBLIC_RECOGNITION_PAUSE_MS` controls how long completed strokes are grouped before recognition and defaults to 2000 ms. The backend currently allows HTTP CORS from `localhost:3000`; configure the origin when serving the frontend on another address.
 
 For voice, also install `agent/requirements.txt`, configure `agent/.env` using `agent/.env.example`, and run `python main.py dev` from `agent/`. The Python LiveKit worker is a separate process, not a Compose service. The local prepared hints are separate from the live tutor and never claim to analyze handwriting.
 

@@ -1,6 +1,6 @@
 # Mimir project context
 
-Updated **2026-09-19** after pulling `main` through **`37d940f`** and revamping the frontend. This supersedes the original `568b8fd` inspection. Read [PRODUCT.md](../PRODUCT.md) for requirements and [DESIGN.md](../DESIGN.md) for the current visual system.
+Updated **2026-09-19** after the frontend revamp and integration of the `latex` branch. This supersedes the original `568b8fd` inspection. Read [PRODUCT.md](../PRODUCT.md) for requirements and [DESIGN.md](../DESIGN.md) for the current visual system.
 
 ## Current experience
 
@@ -19,7 +19,7 @@ Repository: `Ishfaq-code/Mimir`. Local path: `/Users/stevin/Documents/Projects/M
 | Navigation | Wheel pan, modifier-wheel zoom, Space/middle-button drag, finger pan, zoom buttons. Active pointer guard ignores competing pointers during a gesture. |
 | Practice | Three selectable algebra problems; each retains ink in memory while switching. History/tool/camera reset on remount. |
 | Prepared guides | Per-problem hints, SVG visualizations, and incremental worked examples in the sidebar. |
-| MyScript | Optional Typeset math switch debounces completed strokes for 600 ms and calls `/ws/latex`. Successful results render in the original region and are exposed to the voice tutor's canvas context. |
+| MyScript | Optional Typeset math switch groups completed strokes after a configurable pause (2 seconds by default) and calls `/ws/latex`. Successful results render at the original size, position, and ink color and are exposed to the voice tutor's canvas context. |
 | Live voice | `VoiceTutor` obtains a token, joins LiveKit, publishes microphone audio, plays remote audio, and registers canvas RPCs. |
 | Tutor annotations | Agent can inspect current problem/recognized work and call `write_latex`; annotations use world coordinates above the ink. |
 | Error states | Recognition failures preserve ink and offer retry. Voice failures display a retryable error. |
@@ -89,9 +89,9 @@ Screen coordinates are CSS pixels relative to the canvas. DPR scales only the ba
 
 ## Recognition and voice boundaries
 
-- Recognition is opt-in. `/ws/latex` sends request IDs and structured strokes; stale replies are discarded. New drawing cancels pending debounce timers, clears old recognized context, and restores the original ink.
-- The current pipeline recognizes the whole set of visible freehand strokes as one expression. It does not yet segment lines/regions or reliably identify individual symbols.
-- Successful recognition hides the original ink visually and overlays KaTeX without deleting geometry. The next stroke restores the handwriting. Disabling conversion also restores ink.
+- Recognition is opt-in. `/ws/latex` round-trips request and stroke IDs with structured strokes so each response maps back to its source ink.
+- The current pipeline groups unrecognized strokes completed within the configured pause into one expression. It can retain multiple recognized overlays, but does not semantically segment lines, regions, or individual symbols.
+- Successful recognition hides only its source ink and overlays normalized KaTeX without deleting geometry. Disabling conversion restores all original ink.
 - The tutor store includes the selected problem as known context (`practice-problem`) and, when available, the current recognized expression (`student-work`). It starts without fabricated student ink.
 - Prepared hints are local content. Live voice and annotations come from the separately configured agent. Do not present prepared hints as evidence of AI understanding.
 - Changing problems clears stale recognized context and tutor annotations and disconnects the old voice component. Closing the sidebar preserves the voice session; reopen Tutor to end it.
@@ -103,7 +103,7 @@ See [README.md](../README.md) for exact commands. Frontend is on `3000`, backend
 
 `backend/.env` is ignored and must exist for Compose. No provider credentials were supplied during the revamp; a comment-only local file was created to allow the core app to run. Configure MyScript/LiveKit from `backend/.env.example`, and OpenAI/LiveKit worker settings from `agent/.env.example`. Never place provider secrets in a `NEXT_PUBLIC_*` variable.
 
-Frontend overrides: `NEXT_PUBLIC_TOKEN_URL`, `NEXT_PUBLIC_RECOGNIZER_WS_URL`. Defaults use the browser hostname and backend port 8000. Production/tunnel URLs and CORS need deliberate configuration. The current backend CORS list is only `http://localhost:3000`. iPad microphone access requires an appropriate secure browser origin; desktop localhost does not establish iPad HTTPS readiness.
+Frontend overrides: `NEXT_PUBLIC_TOKEN_URL`, `NEXT_PUBLIC_RECOGNIZER_WS_URL`, and `NEXT_PUBLIC_RECOGNITION_PAUSE_MS`. Network defaults use the browser hostname and backend port 8000; the recognition pause defaults to 2000 ms. Production/tunnel URLs and CORS need deliberate configuration. The current backend CORS list is only `http://localhost:3000`. iPad microphone access requires an appropriate secure browser origin; desktop localhost does not establish iPad HTTPS readiness.
 
 ## Verification record
 

@@ -82,27 +82,35 @@ async def latex_websocket(websocket: WebSocket) -> None:
         while True:
             message = await websocket.receive_json()
             request_id = message.get("requestId")
+            stroke_id = message.get("strokeId")
+            stroke_ids = message.get("strokeIds")
             strokes = message.get("strokes")
 
             if not isinstance(strokes, list) or not strokes:
                 await websocket.send_json({
                     "type": "result",
                     "requestId": request_id,
+                    "strokeId": stroke_id,
+                    "strokeIds": stroke_ids,
                     "latex": "",
                 })
                 continue
 
             try:
-                result = await recognize_with_myscript(strokes)
+                result = await recognize_with_myscript(strokes, stroke_id, stroke_ids)
                 await websocket.send_json({
                     "type": "result",
                     "requestId": request_id,
+                    "strokeId": stroke_id,
+                    "strokeIds": stroke_ids,
                     **result,
                 })
             except Exception as exc:
                 await websocket.send_json({
                     "type": "error",
                     "requestId": request_id,
+                    "strokeId": stroke_id,
+                    "strokeIds": stroke_ids,
                     "error": str(exc),
                 })
     except WebSocketDisconnect:
@@ -117,11 +125,15 @@ def is_myscript_configured() -> bool:
     )
 
 
-async def recognize_with_myscript(strokes: list[list[dict[str, Any]]]) -> dict[str, Any]:
+async def recognize_with_myscript(
+    strokes: list[list[dict[str, Any]]],
+    stroke_id: str | None = None,
+    stroke_ids: list[str] | None = None,
+) -> dict[str, Any]:
     stroke_items = []
     for index, stroke in enumerate(strokes):
         stroke_items.append({
-            "id": str(index),
+            "id": (stroke_ids[index] if stroke_ids and index < len(stroke_ids) else None) or stroke_id or str(index),
             "pointerType": stroke[0].get("pointerType", "mouse") if stroke else "mouse",
             "x": [point["x"] for point in stroke],
             "y": [point["y"] for point in stroke],
