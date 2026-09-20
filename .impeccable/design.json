@@ -286,14 +286,6 @@
       "css": ".ds-voice{font:500 12px/1.5 Geist,Arial,sans-serif;transition:background-color 160ms ease-out;border:0;padding:13px 16px;border-radius:9px;color:oklch(98.5% 0.005 155);background:oklch(40% 0.079 159);}.ds-voice:hover{background:oklch(34% 0.072 159);}.ds-voice:focus-visible{outline:2px solid oklch(40% 0.079 159);outline-offset:4px;}"
     },
     {
-      "name": "Prepared hint",
-      "kind": "button",
-      "refersTo": "button-hint",
-      "description": "Optional support for the selected problem.",
-      "html": "<button class=\"ds-hint\">Give me a hint</button>",
-      "css": ".ds-hint{font:500 12px/1.5 Geist,Arial,sans-serif;transition:background-color 160ms ease-out;padding:12px;border:0;border-radius:8px;background:oklch(93% 0.026 155);color:oklch(40% 0.079 159);}.ds-hint:hover{background:color-mix(in oklch,oklch(93% 0.026 155),oklch(40% 0.079 159) 7%);}.ds-hint:focus-visible{outline:2px solid oklch(40% 0.079 159);outline-offset:4px;}"
-    },
-    {
       "name": "Selected pen",
       "kind": "button",
       "refersTo": "tool-selected",
@@ -310,22 +302,22 @@
       "css": ".ds-eraser{height:42px;width:42px;display:flex;align-items:center;justify-content:center;border:0;border-radius:8px;color:oklch(53% 0.015 155);background:transparent;}.ds-eraser:hover{background:oklch(96.5% 0.009 120);}.ds-eraser:focus-visible{outline:2px solid oklch(40% 0.079 159);outline-offset:4px;}"
     },
     {
-      "name": "Topic label",
-      "kind": "chip",
-      "refersTo": "problem-tag",
-      "description": "A quiet descriptor for the current problem.",
-      "html": "<span class=\"ds-tag\">Distributive property</span>",
-      "css": ".ds-tag{font:400 10px Geist,Arial,sans-serif;display:inline-block;padding:5px 9px;border:1px solid oklch(89% 0.009 130);border-radius:5px;color:oklch(53% 0.015 155);}"
+      "name": "Confirm question",
+      "kind": "button",
+      "refersTo": "button-confirm",
+      "description": "Publishes reviewed screenshot text to the tutor.",
+      "html": "<button class=\"ds-confirm\">Confirm question</button>",
+      "css": ".ds-confirm{font:550 13px Geist,Arial,sans-serif;border:0;border-radius:8px;padding:13px 15px;color:oklch(98.5% 0.005 155);background:oklch(40% 0.079 159);}.ds-confirm:hover{background:oklch(34% 0.072 159);}.ds-confirm:focus-visible{outline:2px solid oklch(40% 0.079 159);outline-offset:4px;}"
     }
   ],
   "narrative": {
     "northStar": "Room to work",
-    "overview": "A student is at a desk after class, with daylight in the room, an iPad, and a problem they are trying to understand. The default workspace is warm and bright, with a quiet green accent. An explicit dark theme supports a different environment without changing the layout.\n\nThe canvas is the main surface. A compact header establishes the problem; the tutor occupies a separate right column on wide screens and an optional overlay on small screens. This is product UI, not a marketing page. The visual hierarchy gives writing room while making the next useful action easy to find.",
+    "overview": "A student pastes a screenshot at their desk after class. The bright canvas keeps the image and freehand work together; a quiet green review panel confirms the question before live tutoring.",
     "keyCharacteristics": [
-      "Warm paper, green controls, and an unobtrusive dot grid.",
-      "A fixed problem header above an unrestricted writing surface.",
-      "A compact bottom toolbar with comfortable drawing controls.",
-      "A tutor sidebar that separates prepared guidance from live voice."
+      "Warm paper and a quiet dot grid.",
+      "Screenshot input with editable OCR confirmation.",
+      "Compact Pen/Eraser toolbar.",
+      "Voice available after confirmation."
     ],
     "rules": [
       {
@@ -335,7 +327,7 @@
       },
       {
         "name": "The Working Surface Rule.",
-        "body": "Use display scale only for the current equation and the short tutor introduction. Keep the remaining UI compact.",
+        "body": "Keep only task controls, question content, review prompts, and actionable status/errors.",
         "section": "typography"
       },
       {
@@ -348,7 +340,7 @@
       "Do keep the canvas dominant and the pen active after each stroke.",
       "Do use the same green action vocabulary throughout the interface.",
       "Do preserve the voice, recognition, and tutor-annotation integrations.",
-      "Do label prepared guidance separately from live tutor behavior.",
+      "Do require confirmation before using recognized question text.",
       "Do check both themes, narrow layouts, and the actual iPad for relevant changes."
     ],
     "donts": [

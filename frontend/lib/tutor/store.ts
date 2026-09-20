@@ -1,10 +1,11 @@
 import type { CanvasState, RecognizedEquation, TutorAnnotation } from "./types";
 
-// The workspace supplies the selected problem after mounting. No synthetic
+// The workspace supplies a confirmed screenshot question. No synthetic
 // student handwriting is rendered or reported to the tutor.
 let revision = 0;
 let equations: RecognizedEquation[] = [];
 let tutorAnnotations: TutorAnnotation[] = [];
+let question: CanvasState["question"] = null;
 
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
@@ -27,7 +28,7 @@ export function getTutorAnnotations(): TutorAnnotation[] {
 }
 
 export function getCanvasState(): CanvasState {
-  return { revision, equations, tutorAnnotations };
+  return { revision, question, equations, tutorAnnotations };
 }
 
 export function addTutorAnnotation(annotation: TutorAnnotation): void {
@@ -42,9 +43,10 @@ export function clearTutorAnnotations(): void {
   emit();
 }
 
-/** Current practice problem is known context, not recognized student ink. */
-export function setPracticeProblem(latex: string): void {
-  equations = [{ id: "practice-problem", latex }];
+/** Draft OCR is never tutor context. Only the student's confirmed text is used. */
+export function setConfirmedQuestion(text: string | null): void {
+  question = text ? { text, source: "screenshot", confirmed: true } : null;
+  equations = [];
   tutorAnnotations = [];
   revision += 1;
   emit();

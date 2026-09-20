@@ -10,6 +10,14 @@ import { pointXY } from "./types";
 
 const GRID_SIZE = 20;
 
+export interface CanvasScreenshot {
+  image: HTMLImageElement;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 // ── public entry point ─────────────────────────────────────────────
 
 export function renderScene(
@@ -21,6 +29,7 @@ export function renderScene(
   camera: Camera,
   dark: boolean,
   hiddenIds: Set<string> = new Set(),
+  screenshot: CanvasScreenshot | null = null,
 ) {
   ctx.save();
   ctx.clearRect(0, 0, width, height);
@@ -36,6 +45,10 @@ export function renderScene(
   ctx.save();
   ctx.scale(camera.zoom, camera.zoom);
   ctx.translate(-camera.x, -camera.y);
+
+  if (screenshot) {
+    ctx.drawImage(screenshot.image, screenshot.x, screenshot.y, screenshot.width, screenshot.height);
+  }
 
   for (const el of elements) {
     if (el.isDeleted || hiddenIds.has(el.id)) continue;

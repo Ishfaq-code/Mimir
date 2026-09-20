@@ -14,23 +14,25 @@ The student writes freely, makes mistakes, asks questions aloud, and continues s
 
 A live AI tutor that follows handwritten work on an infinite canvas, talks with the student, and points to the exact part of the work it is discussing. The student should feel able to keep thinking and writing while help is available beside them.
 
-Success for the demo means the student can work through a preloaded algebra problem, ask for help, receive a useful spoken hint tied to their handwriting, correct a mistake, and reach the answer. Real recognition and tutor responses are required before describing that complete experience as implemented.
+Success for the demo means the student can work through a pasted algebra question, ask for help, receive a useful spoken hint tied to their handwriting, correct a mistake, and reach the answer. Real recognition and tutor responses are required before describing that complete experience as implemented.
 
 ## Confirmed Requirements
 
 | Area | User's direction |
 | --- | --- |
-| Student work | Freehand equations, not typed equations. |
+| Student work | Freehand math is primary. An optional Text tool supports typed boxes on the canvas. |
 | Workspace | Infinite/free canvas; this supersedes the earlier single-notebook-page idea. |
-| Controls | Pen and Eraser, with white ink available. No automatic selection box after each stroke. |
+| Controls | Pen, Eraser, and Text, with white ink available. No automatic selection box after each stroke. |
 | Conversation | Natural live voice conversation, with the tutor able to follow the student's work. |
 | Intervention | When the student asks a question or their work is clearly going in the wrong direction. |
 | Guidance | A short question or hint connected to the relevant handwritten expression. |
 | Annotation | Circle/highlight the relevant ink; the user suggested a glow lasting about three seconds while the tutor speaks. |
 | Demonstration | Explain step by step when needed; tutor-written math should appear to draw itself. |
-| Problem source | Preloaded basic algebra for the first demo. Pasted questions and visual explanations are desired extensions. |
+| Problem source | Paste a screenshot onto the canvas. OCR it, ask the student to confirm or correct the question, and tutor only from the confirmed text. Other input methods come later. |
 | Completion | Help the student reach a correct answer. |
 | Constraints | Fast hackathon iteration, reuse existing tools/APIs when useful, approximately $20 total API budget. |
+
+The screenshot flow supersedes the earlier preset algebra questions. Keep interface copy limited to necessary controls, review prompts, and actionable status/errors. Typing is allowed for OCR corrections and optional canvas textboxes. Freehand math remains the main solving interaction.
 
 The original time budget was 24 hours. That was a historical constraint, not a live countdown. No sponsor requirements were specified.
 
@@ -53,6 +55,7 @@ The user's examples establish a conversational, guiding tutor voice: brief quest
 - **Typed math as the primary student input.** A text field must not replace the handwritten working surface.
 - **Unrequested full solutions.** Guide the student first; use demonstrations when they need them.
 - **Teacher dashboards before the core tutor works.** Reporting must not displace the demo's main learning loop.
+- **Filler text and preset problem menus.** The student brings their question. Remove slogans and redundant instructions.
 
 These are product constraints from the conversation, not a newly imposed aesthetic brief.
 
@@ -75,6 +78,6 @@ No formal accessibility standard or additional individual accommodation was spec
 - Production suitability and configuration of the current MyScript and LiveKit/OpenAI integrations. These arrived from collaborators on `main`; they are implemented code, not a newly purchased service.
 - Exact end-of-step detection, confidence thresholds, and intervention timing.
 - How the student navigates an infinite canvas with touch while the Pencil draws.
-- Durable persistence, full voice/recognition validation on iPad, and expansion beyond the three prepared algebra guides. The frontend now places the problem above the canvas and offers visual examples in the tutor panel.
+- Durable persistence, full voice/recognition validation on iPad, and general visual explanations. Screenshot OCR currently targets printed English questions and basic algebra; complex mathematical layout may need correction.
 
 Implementation facts and a suggested build order live in [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md). Visual values extracted from the current app live in [DESIGN.md](DESIGN.md).

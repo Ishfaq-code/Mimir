@@ -22,7 +22,7 @@ type VoiceStatus =
   | "error";
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
-  disconnected: "Ready when you are",
+  disconnected: "",
   connecting: "Connecting…",
   listening: "Listening",
   thinking: "Thinking…",
@@ -126,7 +126,7 @@ export default function VoiceTutor() {
 
   return (
     <div className={`voice-control voice-${status}`}>
-      <div className="voice-status" role="status"><span className="status-dot"/>{STATUS_LABEL[status]}</div>
+      {STATUS_LABEL[status] && <div className="voice-status" role="status"><span className="status-dot"/>{STATUS_LABEL[status]}</div>}
       <button type="button" className="voice-button" onClick={() => (connected ? void disconnect() : void connect())} disabled={status === "connecting"}>
         <Icon name={connected ? "close" : "mic"} size={20}/><span>{status === "connecting" ? "Connecting…" : connected ? "End conversation" : "Talk to Mimir"}</span><span className="voice-wave" aria-hidden="true"><i/><i/><i/><i/></span>
       </button>

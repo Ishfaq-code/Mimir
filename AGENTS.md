@@ -26,7 +26,7 @@ These references were established on 2026-09-19 and refreshed after pulling `37d
 ## Product constraints to preserve
 
 - iPad and Apple Pencil are the primary intended input. Students solve by handwriting on an infinite canvas.
-- Expose Pen and Eraser as the student drawing tools. Keep white ink available.
+- Expose Pen, Eraser, and Text as the student tools. Keep white ink available.
 - Finishing a pen stroke must leave Pen active and must not select the stroke or show resize handles.
 - The user's previous complaint was the automatic selection box, not the handwriting renderer. Do not replace smoothing or stroke capture without a relevant request or demonstrated problem.
 - The tutor should respond to a question or a clearly wrong completed step. It should guide first and demonstrate step by step when needed.
@@ -37,8 +37,8 @@ These references were established on 2026-09-19 and refreshed after pulling `37d
 - Despite earlier references to “Excalidraw,” the active editor is custom Canvas 2D. No Excalidraw SDK is installed.
 - The active page is `frontend/app/page.tsx` → `components/PracticeWorkspace.tsx` → `components/InfiniteCanvas.tsx`.
 - `components/Canvas.tsx`, `components/LatexPreview.tsx`, and `lib/recognizer.ts` are disconnected scaffolding. Do not mistake their comments for an active recognition pipeline.
-- The sidebar has explicitly labeled prepared hints and visuals. LiveKit/OpenAI voice, MyScript conversion, and tutor LaTeX annotations are integrated separately and require provider configuration plus the Python agent worker. Preserve these integrations when changing UI.
-- Drawings and guides are in memory. Problem switching retains ink; closing the tutor retains its state and voice session. Reloading loses the visit. Preserve user drawings when inspecting the browser; use a separate disposable tab for destructive checks.
+- The student pastes a screenshot. Local Tesseract OCR runs in a worker, then the student edits/confirms the question. Only confirmed text enters `CanvasState.question`; never populate student equations from problem text. LiveKit/OpenAI voice, MyScript conversion, and tutor LaTeX annotations require separate provider configuration plus the Python agent worker. Preserve these integrations when changing UI.
+- Drawings, screenshots, and reviewed question text are in memory. Replacing a screenshot preserves ink but clears question confirmation and ends voice. Closing the tutor retains its state and voice session. Reloading loses the visit. Preserve user drawings when inspecting the browser; use a separate disposable tab for destructive checks.
 - Docker serves the frontend as a production build without a source mount. Frontend edits require rebuilding; use Next dev for hot reload. The backend has a source mount and Uvicorn reload.
 - Keep provider secrets on the server. The existing `NEXT_PUBLIC_RECOGNIZER_WS_URL` is a public endpoint setting, not an API-key slot.
 

@@ -1,6 +1,6 @@
 ---
 name: "Mimir"
-description: "A quiet workspace for handwritten math and a tutor beside you."
+description: "A screenshot, a canvas, and a tutor."
 colors:
   paper: "oklch(98.5% 0.007 100)"
   surface: "oklch(99.4% 0.003 100)"
@@ -25,17 +25,12 @@ typography:
     fontSize: "13px"
     fontWeight: 400
     lineHeight: 1.8
-  tutor-heading:
+  review-heading:
     fontFamily: "Geist, Arial, sans-serif"
-    fontSize: "25px"
+    fontSize: "21px"
     fontWeight: 500
     lineHeight: 1.25
     letterSpacing: "-1px"
-  problem:
-    fontFamily: "Georgia, Times New Roman, serif"
-    fontSize: "33px"
-    fontWeight: 400
-    lineHeight: 1.25
   control:
     fontFamily: "Geist, Arial, sans-serif"
     fontSize: "12px"
@@ -63,11 +58,11 @@ components:
     textColor: "{colors.on-accent}"
     rounded: "{rounded.action}"
     padding: "13px 16px"
-  button-hint:
-    backgroundColor: "{colors.accent-soft}"
-    textColor: "{colors.accent}"
+  button-confirm:
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.on-accent}"
     rounded: "{rounded.control}"
-    padding: "12px"
+    padding: "13px 15px"
   tool-selected:
     backgroundColor: "{colors.accent-soft}"
     textColor: "{colors.accent}"
@@ -81,10 +76,6 @@ components:
     backgroundColor: "{colors.surface}"
     rounded: "{rounded.toolbar}"
     padding: "6px"
-  problem-tag:
-    textColor: "{colors.muted}"
-    rounded: "{rounded.tag}"
-    padding: "5px 9px"
 ---
 
 # Design System: Mimir
@@ -95,26 +86,26 @@ components:
 
 A student is at a desk after class, with daylight in the room, an iPad, and a problem they are trying to understand. The default workspace is warm and bright, with a quiet green accent. An explicit dark theme supports a different environment without changing the layout.
 
-The canvas is the main surface. A compact header establishes the problem; the tutor occupies a separate right column on wide screens and an optional overlay on small screens. This is product UI, not a marketing page. The visual hierarchy gives writing room while making the next useful action easy to find.
+The canvas is the main surface. A 64 px header holds only the mark, Paste screenshot, theme, and Tutor controls. The sidebar is initially closed; pasting opens a question review. No preset problem header, slogan, welcome paragraph, or prepared hint menu remains.
 
 **Key Characteristics:**
 
-- Warm paper, green controls, and an unobtrusive dot grid.
-- A fixed problem header above an unrestricted writing surface.
-- A compact bottom toolbar with comfortable drawing controls.
-- A tutor sidebar that separates prepared guidance from live voice.
+- Warm paper, a restrained green accent, and a quiet dot grid.
+- The pasted question remains in the same world space as the student's ink.
+- Inline OCR review and correction before the tutor receives the question.
+- A compact drawing toolbar, with no handles after pen strokes.
 
-Updated after the frontend revamp on 2026-09-19, based on `app/globals.css` and the rendered app. Frontmatter captures the light-theme baseline plus explicit dark counterparts. Application source remains authoritative. The sidecar's generated palette ramps are preview aids, not additional app colors.
+Updated for screenshot import and question confirmation. Source code is authoritative; generated palette ramps in the sidecar are preview aids, not additional app colors.
 
 ## Colors
 
 ### Primary
 
-Forest green (`accent`) marks active tools, the hint action, and live voice. The pale green `accent-soft` surface supports selection. Dark mode uses a lighter green accent with dark text on solid buttons. Hover deepens the light-theme green and brightens it in dark mode.
+Forest green (`accent`) marks active tools, question confirmation, and live voice. The pale green `accent-soft` surface supports selection. Dark mode uses a lighter green accent with dark text on solid buttons. Hover deepens the light-theme green and brightens it in dark mode.
 
 ### Neutral
 
-`paper` is the writing surface; `surface` is the header, tutor column, and toolbar. `surface-soft` holds visual examples and quiet hover states. Text uses `ink`, with `muted` and `faint` for supporting copy. Rules and outlines use `line`. All UI neutrals have a small chroma rather than pure black or white.
+`paper` is the writing surface; `surface` is the header, tutor column, and toolbar. `surface-soft` holds loading placeholders and quiet hover states. Text uses `ink`, with `muted` and `faint` for supporting copy. Rules and outlines use `line`. All UI neutrals have a small chroma rather than pure black or white.
 
 ### Ink
 
@@ -126,11 +117,11 @@ The eight existing ink colors are content choices and retain their literal value
 
 **Body Font:** Geist, Arial, sans-serif.
 
-**Math Font:** Georgia, Times New Roman, serif for the printed problem and prepared worked examples. Runtime recognized/tutor math uses KaTeX. Student handwriting remains geometry.
+**Math Font:** Runtime recognized handwriting and tutor math use KaTeX. Imported question text uses the body font; the original screenshot preserves its own typography. Student handwriting remains geometry.
 
-Body UI uses a fixed scale: problem math 33 px, introductory tutor heading 25 px, guide copy 13 px, controls 12–13 px, and supporting labels 9–11 px. The wordmark is 25 px with tight tracking. Mobile uses 29 px problem math and an 18 px empty-state heading. Body copy stays well below 65 characters per line in the tutor column.
+Review headings use 21 px, corrected question text uses 15–16 px, controls use 12–13 px, and compact status uses 10–11 px. Keep question text below 75ch. The textarea is 16 px to avoid small-input zoom on mobile.
 
-**The Working Surface Rule.** Use display scale only for the current equation and the short tutor introduction. Keep the remaining UI compact.
+**The Working Surface Rule.** No slogans or decorative instructions. Every visible word must support an action, content review, or recovery.
 
 ## Elevation
 
@@ -140,27 +131,25 @@ The header and sidebar are solid, separated by 1 px neutral rules. The floating 
 
 ## Components
 
-### App shell and problem
+### App shell and question review
 
-A 76 px header contains the mark, practice label, theme control, and Tutor toggle. It becomes 64 px on phones. The main layout reserves 350 px for the tutor, 310 px on smaller wide screens, and 380 px above 1400 px. Below 1000 px the tutor is closed by default and opens as an overlay; below 600 px that overlay occupies the workspace width. Covered workspace controls become inert. Escape or Close returns focus to the Tutor toggle.
+The header is 64 px at every size. The canvas initially fills the workspace. The optional tutor column is 350 px, 330 px on smaller wide screens, and 380 px above 1400 px. Below 1000 px it overlays the workspace; below 600 px it fills the workspace width. Covered canvas controls are inert. Escape or Close returns focus to Tutor.
 
-The problem block uses 28–40 px spacing and a thin bottom rule. Navigation has previous/next controls and a true three-problem count. Printed equations are prompts; student work remains entirely freehand.
+Pasting an image opens the review panel with a short loading status, skeleton lines, and progress. The result asks “Is this right?”, shows an editable textarea, and provides Confirm question and Read again. Empty text cannot be confirmed. A small screenshot preview in narrow layouts keeps the original visible while editing. Completion focuses the review heading rather than automatically opening the iPad keyboard.
+
+Confirmed text replaces the review form and reveals the voice control. Edit returns to review and ends voice. Screenshot/read errors give a specific recovery action. No modal interrupts writing.
 
 ### Canvas and drawing toolbar
 
-The existing Canvas 2D renderer paints a 20-world-unit grid. The empty state disappears after ink is added. The toolbar sits 64 px above the canvas bottom, with zoom/navigation in a separate footer. ResizeObserver maintains the backing store as available width changes.
+The existing Canvas 2D renderer paints a 20-world-unit grid. The single “Paste a screenshot” affordance disappears after ink or an image is added. The toolbar sits 64 px above the canvas bottom, with zoom/navigation in a separate footer. ResizeObserver maintains the backing store as available width changes.
 
-Pen and Eraser are the only drawing tools. Buttons are 42 px high (40 px minimum width on phones); the selected tool uses pale green. Ink options open in an anchored 320 px popover (300 px on phones), close outside or with Escape, and retain all eight colors and three widths. Undo/redo buttons show disabled state when unavailable.
-
-### Tutor guide
-
-The sidebar uses sections and fine separators, not nested cards. Prepared hints are explicitly labeled. “Help me visualize” reveals a diagram; “Walk me through it” reveals one worked step at a time. Visuals use green x-tiles, neutral unit tiles, thin diagram lines, and explanatory captions. Hints and examples are local problem content, not claims that the canvas was analyzed.
+Pen, Eraser, and Text are the exposed tools. Text mode supports tap-to-create and tap-to-edit, Done/Enter to save, Shift+Enter for a new line, and Escape/Cancel to discard edits. Text uses the selected ink color and participates in undo/redo and erasing. Finger taps create text in Text mode; finger navigation remains available with the other tools. Buttons are 42 px high (40 px minimum width on phones); the selected tool uses pale green. Ink options open in an anchored 320 px popover (300 px on phones), close outside or with Escape, and retain all eight colors and three widths. Undo/redo buttons show disabled state when unavailable.
 
 ### Voice and recognition
 
-Voice lives in the sidebar footer, with a status label, Talk/End button, pending state, and recoverable error. The small waveform animates only while speaking. Closing the sidebar retains a voice session; switching problems ends it.
+Voice lives in the sidebar footer, with a status label, Talk/End button, pending state, and recoverable error. The small waveform animates only while speaking. Closing the sidebar retains a voice session; editing or replacing a question ends it. Voice appears only after confirmation.
 
-The Typeset math switch remains on the canvas. Recognition failures preserve ink and expose a retry action. Recognized math and tutor annotations remain aligned with world coordinates. Provider configuration is required for both live capabilities.
+The Typeset math switch remains on the canvas. Recognition failures preserve ink and expose a retry action. Recognized math and tutor annotations remain aligned with world coordinates. Provider configuration is required for voice and stroke conversion. Screenshot OCR is local and needs no provider credentials.
 
 ### Interaction and accessibility
 
@@ -173,7 +162,7 @@ Controls have names and visible keyboard focus. Ink/width selections use pressed
 - Do keep the canvas dominant and the pen active after each stroke.
 - Do use the same green action vocabulary throughout the interface.
 - Do preserve the voice, recognition, and tutor-annotation integrations.
-- Do label prepared guidance separately from live tutor behavior.
+- Do require confirmation before publishing screenshot text as tutor context.
 - Do check both themes, narrow layouts, and the actual iPad for relevant changes.
 
 ### Don't:
@@ -182,5 +171,5 @@ Controls have names and visible keyboard focus. Ink/width selections use pressed
 - Don't substitute **Typed math as the primary student input.**
 - Don't default to **Unrequested full solutions.** Reveal support when requested.
 - Don't prioritize **Teacher dashboards before the core tutor works.**
-- Don't add decorative gradients, glass panels, or repeated card grids.
+- Don't add decorative gradients, glass panels, repeated card grids, or filler copy.
 - Don't claim a provider or hardware test passed from frontend-only checks.

@@ -2,7 +2,9 @@
 
 Mimir is an iPad-oriented AI math tutor project: students write on an infinite canvas and the planned tutor guides them through live conversation and annotations.
 
-**Current state:** a canvas-first practice workspace with three algebra problems, Pen/Eraser, visible undo/redo, light/dark themes, and a responsive tutor sidebar. Prepared hints, visual explanations, and worked examples run locally. MyScript handwriting conversion and LiveKit/OpenAI voice tutoring are integrated and require provider configuration. Work is retained when switching problems during a visit, but a reload clears it.
+**Current state:** paste a screenshot onto the canvas with ⌘V / Ctrl+V or the Paste screenshot button. The app reads it locally, asks “Is this right?”, and lets the student edit and confirm the question. Only confirmed text becomes tutor context. The original image stays on the canvas with Pen/Eraser/Text, undo/redo, and light/dark themes. There are no preset questions or prepared hints.
+
+Screenshot OCR uses Tesseract.js in a browser worker and needs no API key. It is intended for printed English and simple algebra. Fractions, exponents, diagrams, and handwriting can need manual correction. Nothing is uploaded for OCR. Confirmed text is shared with the voice tutor only when a voice session is started. MyScript handwriting conversion and LiveKit/OpenAI voice still require their own provider configuration. Reload clears the visit.
 
 ## Project references
 
@@ -15,7 +17,7 @@ The design preview extensions live in [.impeccable/design.json](.impeccable/desi
 
 ## Run With Docker
 
-Create `backend/.env` from the documented settings in `backend/.env.example` before starting Compose. An empty local file is sufficient for the canvas and prepared guides. MyScript credentials enable recognition; LiveKit credentials enable token minting. Keep real credentials out of Git.
+Create `backend/.env` from the documented settings in `backend/.env.example` before starting Compose. An empty local file is sufficient for the canvas and screenshot OCR. MyScript credentials enable recognition; LiveKit credentials enable token minting. Keep real credentials out of Git.
 
 Start both services from the repository root:
 
@@ -61,7 +63,13 @@ npm run dev
 
 The backend may keep running in Docker. The frontend uses `/token` for voice and `/ws/latex` for the optional Typeset math switch. `NEXT_PUBLIC_TOKEN_URL` and `NEXT_PUBLIC_RECOGNIZER_WS_URL` override their endpoints. Defaults target the current browser hostname on port 8000. The backend currently allows HTTP CORS from `localhost:3000`; configure the origin when serving the frontend on another address.
 
-For voice, also install `agent/requirements.txt`, configure `agent/.env` using `agent/.env.example`, and run `python main.py dev` from `agent/`. The Python LiveKit worker is a separate process, not a Compose service. The local prepared hints are separate from the live tutor and never claim to analyze handwriting.
+For voice, also install `agent/requirements.txt`, configure `agent/.env` using `agent/.env.example`, and run `python main.py dev` from `agent/`. The Python LiveKit worker is a separate process, not a Compose service. The voice control appears only after the screenshot question is confirmed. Editing or replacing it ends the old voice session; closing the panel retains the session.
+
+## OCR assets
+
+`npm run dev` and `npm run build` copy the installed OCR worker, WASM cores, and English data into `frontend/public/ocr/`. These generated files are ignored by Git and ESLint. The browser loads them from the app itself. Docker copies the generated assets into the production image. No CDN request is needed at runtime.
+
+Clipboard reading requires a browser-supported secure context, such as localhost or HTTPS. If the Paste button is blocked, use the browser’s native paste command. Other input methods are not implemented yet.
 
 ## Checks
 
