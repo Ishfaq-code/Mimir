@@ -75,18 +75,26 @@ export default function PracticeWorkspace() {
         <div className="header-actions">
           <button className="paste-button" aria-label="Paste screenshot" onClick={() => void pasteScreenshot()} disabled={pasting}><Icon name="clipboard" size={17}/><span>Paste screenshot</span></button>
           <button className="icon-button theme-toggle" onClick={() => setDark(value => !value)} aria-label={dark ? "Use light theme" : "Use dark theme"}><Icon name={dark ? "sun" : "moon"} size={19}/></button>
-          <button ref={tutorToggleRef} className="tutor-toggle" onClick={() => setPanelOpen(value => !value)} aria-controls="tutor-panel" aria-expanded={panelOpen}><Icon name="tutor" size={18}/><span>Tutor</span>{question.phase === "review" && <span className="review-dot"/>}</button>
         </div>
       </header>
       <div className="workspace-layout">
+        <button
+          ref={tutorToggleRef}
+          className="tutor-island"
+          onClick={() => setPanelOpen(value => !value)}
+          aria-controls="tutor-panel"
+          aria-expanded={panelOpen}
+        >
+          <Icon name="tutor" size={18}/><span>Tutor</span>{question.phase === "review" && <span className="review-dot"/>}
+        </button>
         <main className="workspace-main" aria-label="Math workspace" inert={panelOpen && !wide}>
           <InfiniteCanvas dark={dark} screenshot={question.screenshot} onPasteScreenshot={() => void pasteScreenshot()} />
           {question.pasteError && <div className="paste-notice" role="alert"><span>{question.pasteError}</span><button className="icon-button" aria-label="Dismiss paste message" onClick={() => setPasteError("")}><Icon name="close" size={16}/></button></div>}
         </main>
         <aside className="tutor-panel" id="tutor-panel" aria-label="Question and tutor" onKeyDown={event => { if (event.key === "Escape") closePanel(); }}>
-          <div className="tutor-heading"><h1>Question</h1><button className="icon-button" onClick={closePanel} aria-label="Close tutor"><Icon name="close" size={18}/></button></div>
+          <div className="tutor-heading"><h1>Tutor</h1><button className="icon-button" onClick={closePanel} aria-label="Close tutor"><Icon name="close" size={18}/></button></div>
           <div className="question-body">
-            {question.phase === "empty" && <button className="secondary-button" onClick={() => void pasteScreenshot()} disabled={pasting}><Icon name="clipboard" size={18}/>Paste screenshot</button>}
+            {question.phase === "empty" && <div className="question-empty"><h2>Your tutor is ready.</h2><p>Start talking now, or paste a question when you want to give your tutor more context.</p><button className="secondary-button" onClick={() => void pasteScreenshot()} disabled={pasting}><Icon name="clipboard" size={18}/>Paste screenshot</button></div>}
             {question.phase === "reading" && <div className="question-reading" role="status"><h2>Reading screenshot…</h2><div className="ocr-skeleton" aria-hidden="true"><i/><i/><i/></div><progress max={1} value={question.progress || undefined} aria-label="Reading screenshot"/><button className="text-button" onClick={question.edit}>Edit manually</button></div>}
             {question.phase === "review" && <form onSubmit={event => { event.preventDefault(); confirmQuestion(); }}>
               <h2 ref={reviewHeadingRef} tabIndex={-1}>Is this right?</h2>
@@ -98,7 +106,7 @@ export default function PracticeWorkspace() {
             </form>}
             {question.phase === "confirmed" && <><div className="question-confirmed"><span><Icon name="check" size={15}/>Confirmed</span><button className="text-button" onClick={question.edit}>Edit</button></div><p className="question-text">{question.text}</p></>}
           </div>
-          {question.phase === "confirmed" && <footer className="tutor-footer"><VoiceTutor key={question.screenshot?.id}/></footer>}
+          <footer className="tutor-footer"><VoiceTutor key={`${question.screenshot?.id ?? "none"}-${question.phase}`}/></footer>
         </aside>
       </div>
     </div>

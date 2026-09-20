@@ -4,7 +4,7 @@ Updated **2026-09-19** after screenshot import/OCR review, text-tool work, and i
 
 ## Current experience
 
-Mimir is an iPad-oriented math workspace. The student pastes a screenshot directly into the whiteboard using the native paste command or Paste screenshot button. The image is placed in world coordinates behind the ink. Browser-based OCR reads the question; a side panel asks “Is this right?” and provides editable text. Confirming enables live voice and publishes the reviewed text to the tutor. Preset questions, prepared guides, and decorative copy have been removed.
+Mimir is an iPad-oriented math workspace. The student pastes a screenshot directly into the whiteboard using the native paste command or Paste screenshot button. The image is placed in world coordinates behind the ink. Browser-based OCR reads the question; a side panel asks “Is this right?” and provides editable text. The floating Tutor island opens live voice with or without a pasted question; confirming publishes reviewed text to the tutor when available. Preset questions, prepared guides, and decorative copy have been removed.
 
 Repository: `Ishfaq-code/Mimir`. Local root: `/Users/stevin/Documents/Projects/Mimir`. The thread's default `stevin-port` directory is a separate project. Work on `main`, pull before implementation, preserve collaborators, and never force-push.
 
@@ -48,7 +48,7 @@ flowchart TD
 
 | File | Responsibility |
 | --- | --- |
-| `frontend/components/PracticeWorkspace.tsx` | Header, native paste listener, Clipboard API button, question review, theme, responsive panel, confirmation-gated voice. |
+| `frontend/components/PracticeWorkspace.tsx` | Floating Tutor island, native paste listener, Clipboard API button, question review, theme, responsive panel, and voice lifecycle. |
 | `frontend/lib/useScreenshotQuestion.ts` | Screenshot lifecycle, asynchronous import versions, abortable OCR, editable text, confirmation and tutor context. |
 | `frontend/lib/screenshot.ts` | File validation/decode, Tesseract lazy import, OCR progress/timeout/cancellation, worker cleanup. |
 | `frontend/scripts/prepare-ocr.mjs` | Copies installed worker, core variants, language data, and licenses to ignored `public/ocr/` before dev/build. |

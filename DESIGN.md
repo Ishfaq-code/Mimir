@@ -137,7 +137,7 @@ The header is 64 px at every size. The canvas initially fills the workspace. The
 
 Pasting an image opens the review panel with a short loading status, skeleton lines, and progress. The result asks “Is this right?”, shows an editable textarea, and provides Confirm question and Read again. Empty text cannot be confirmed. A small screenshot preview in narrow layouts keeps the original visible while editing. Completion focuses the review heading rather than automatically opening the iPad keyboard.
 
-Confirmed text replaces the review form and reveals the voice control. Edit returns to review and ends voice. Screenshot/read errors give a specific recovery action. No modal interrupts writing.
+Confirmed text replaces the review form and supplies the reviewed question to the voice tutor. The floating Tutor island opens the panel and reveals the voice control even before a question is pasted. Edit returns to review and ends voice. Screenshot/read errors give a specific recovery action. No modal interrupts writing.
 
 ### Canvas and drawing toolbar
 
@@ -147,7 +147,7 @@ Pen, Eraser, and Text are the exposed tools. Text mode supports tap-to-create an
 
 ### Voice and recognition
 
-Voice lives in the sidebar footer, with a status label, Talk/End button, pending state, and recoverable error. The small waveform animates only while speaking. Closing the sidebar retains a voice session; editing or replacing a question ends it. Voice appears only after confirmation.
+Voice lives in the sidebar footer, with a status label, Talk/End button, pending state, and recoverable error. The small waveform animates only while speaking. The Tutor island floats at the side of the canvas and opens the panel before or after question confirmation. Closing the sidebar retains a voice session; editing or replacing a question ends it. Confirmed text is optional context, not a prerequisite for starting voice.
 
 The Typeset math switch remains on the canvas. Recognition failures preserve ink and expose a retry action. Recognized math and tutor annotations remain aligned with world coordinates. Provider configuration is required for voice and stroke conversion. Screenshot OCR is local and needs no provider credentials.
 

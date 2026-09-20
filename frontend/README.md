@@ -8,7 +8,7 @@ Start with the repository [README](../README.md) for Docker and hot-reload comma
 - [Design reference](../DESIGN.md)
 - [Architecture and current status](../docs/PROJECT_CONTEXT.md)
 
-The active route is `app/page.tsx` → `components/PracticeWorkspace.tsx` → `components/InfiniteCanvas.tsx`. It uses a custom Canvas 2D renderer, not the Excalidraw SDK. The sidebar reviews screenshot OCR before enabling the LiveKit voice control. `lib/useScreenshotQuestion.ts` owns import/review/confirmation; `lib/screenshot.ts` runs local Tesseract OCR. MyScript conversion lives in `InfiniteCanvas.tsx`; the older `Canvas.tsx`, `LatexPreview.tsx`, and `lib/recognizer.ts` modules remain unused.
+The active route is `app/page.tsx` → `components/PracticeWorkspace.tsx` → `components/InfiniteCanvas.tsx`. It uses a custom Canvas 2D renderer, not the Excalidraw SDK. The floating Tutor island opens a sidebar with the LiveKit voice control before or after screenshot OCR confirmation. `lib/useScreenshotQuestion.ts` owns import/review/confirmation; `lib/screenshot.ts` runs local Tesseract OCR. MyScript conversion lives in `InfiniteCanvas.tsx`; the older `Canvas.tsx`, `LatexPreview.tsx`, and `lib/recognizer.ts` modules remain unused.
 
 OCR assets are copied from installed packages by `scripts/prepare-ocr.mjs` before dev/build and are not tracked in Git.
 

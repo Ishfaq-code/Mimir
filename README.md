@@ -63,7 +63,7 @@ npm run dev
 
 The backend may keep running in Docker. The frontend uses `/token` for voice and `/ws/latex` for the optional Typeset math switch. `NEXT_PUBLIC_TOKEN_URL` and `NEXT_PUBLIC_RECOGNIZER_WS_URL` override their endpoints. Defaults target the current browser hostname on port 8000. `NEXT_PUBLIC_RECOGNITION_PAUSE_MS` controls how long completed strokes are grouped before recognition and defaults to 2000 ms. The backend currently allows HTTP CORS from `localhost:3000`; configure the origin when serving the frontend on another address.
 
-For voice, also install `agent/requirements.txt`, configure `agent/.env` using `agent/.env.example`, and run `python main.py dev` from `agent/`. The Python LiveKit worker is a separate process, not a Compose service. The voice control appears only after the screenshot question is confirmed. Editing or replacing it ends the old voice session; closing the panel retains the session.
+For voice, also install `agent/requirements.txt`, configure `agent/.env` using `agent/.env.example`, and run `python main.py dev` from `agent/`. The Python LiveKit worker is a separate process, not a Compose service. Open the floating Tutor island to start a voice session with or without a pasted question; confirmed screenshot text is added to the tutor context when available. Editing or replacing a question ends the old voice session; closing the panel retains the session.
 
 ## OCR assets
 
