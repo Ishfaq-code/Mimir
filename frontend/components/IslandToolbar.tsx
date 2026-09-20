@@ -45,7 +45,7 @@ export default function IslandToolbar({tool,onToolChange,style,onStyleChange,onU
       <button className={`tool-button ${tool==="freedraw" ? "selected" : ""}`} onClick={()=>onToolChange("freedraw")} aria-label="Pen" aria-pressed={tool==="freedraw"} title="Pen (P)"><Icon name="pen" size={21}/><span>Pen</span></button>
       <button className={`tool-button ${tool==="eraser" ? "selected" : ""}`} onClick={()=>onToolChange("eraser")} aria-label="Eraser" aria-pressed={tool==="eraser"} title="Eraser (E)"><Icon name="eraser" size={21}/></button>
       <button className={`tool-button ${tool==="text" ? "selected" : ""}`} onClick={()=>onToolChange("text")} aria-label="Text" aria-pressed={tool==="text"} title="Text (T)"><Icon name="text" size={20}/></button>
-      <button className="tool-button" onClick={onVisualize} aria-label="Visualize selected text" title="Visualize selected text"><Icon name="visual" size={20}/><span>Visualize</span></button>
+      <button className="tool-button" onClick={onVisualize} aria-label="Visualize kinematics" title="Visualize a selected question or generate kinematics practice"><Icon name="visual" size={20}/><span>Visualize</span></button>
       <span className="tool-divider"/>
       <button className="tool-button" onClick={onGraph} disabled={!hasSelectedLatex} aria-label="Graph equation" title="Graph selected equation"><Icon name="graph" size={20}/></button>
       <span className="tool-divider"/>

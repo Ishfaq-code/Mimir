@@ -27,7 +27,7 @@ Repository: `Ishfaq-code/Mimir`. Local root: `/Users/stevin/Documents/Projects/M
 | Tutor annotations | Configured LiveKit/OpenAI agent can read canvas context and write LaTeX through RPC. |
 | Error states | Recognition failures preserve ink and expose retry. Voice failures show a recoverable error. |
 | Persistence | In-memory visit only. Reload clears image, reviewed question, and ink. |
-| Visualization | Selected textbox text is sent with the fixed `physics` topic to `POST /visualize`; OpenRouter Ling 3.0 Flash VL extracts motion inputs, then the backend deterministically solves constant-acceleration motion and returns keyframes with complete per-frame variable snapshots, rendered with a timeline slider, live variable readout, and Next control. |
+| Visualization | Selected textbox or confirmed question text is sent with `kinematics` topic to `POST /visualize` (legacy `physics` still accepted). OpenRouter extracts inputs for a single object moving in one direction with constant acceleration. Visualize requires a selected textbox or selected confirmed screenshot; no selection shows paste/select guidance. Plain-text native paste creates a wrapped, undoable textbox. Fixed demo paragraphs in `docs/DEMO_PROBLEMS.md` match deterministic backend templates without provider calls. `GET /visualize/question?kind=speed_up\|braking\|constant_speed\|free_fall` returns question text and nine matching frames without a provider call. Timeline and variable controls render the result. |
 | Absent | Accounts, teacher reports, durable storage, other import methods, generated visualizations beyond the Physics keyframe flow, precise highlighting, animated demonstrations, reliable proactive error detection. |
 
 ## Ownership and data flow
@@ -103,6 +103,20 @@ ESLint, TypeScript, and the Docker production build passed. Production OCR was a
 
 The Text tool was checked by creating multiline text, reopening it, saving corrections, canceling, undoing/redoing edits, clicking outside to create another box, switching to Pen, and erasing a textbox. Lint, TypeScript, and the production build passed. Physical iPad keyboard behavior remains unverified.
 
+### Kinematics implementation, 2026-09-20
+
+Generated practice uses randomized numeric templates and the same deterministic solver as custom problems. Questions cover speeding up, braking to rest, constant speed, and downward free fall with explicit gravity. Text and frames are returned together, so generation does not depend on extraction accuracy. The solver now handles initial/final speed plus duration and constant speed plus distance, rejects inconsistent or unreachable states, and rejects direction reversal. Horizontal motion has correctly directed velocity/acceleration arrows; downward free fall uses a ball. Multiple moving bodies, collision/optimization constraints, and unknown initial speed remain unsupported, with a scope-specific recovery message and generated questions available in the dialog. Generated practice stays separate from voice/screenshot context.
+
+The existing `visualize-tool` checkout was merged with `origin/main` to retain the collaborator's graph tool. Merge verification passed TypeScript; full ESLint reports four pre-existing errors in the incoming `GraphOverlay.tsx` (state updates in effects and ref writes during render).
+
+Verification: seven backend regression tests passed, including 200 seeded question/animation pairs, the initial/final-speed solver regression, invalid motion rejection, the original two-ball rejection, and all generated endpoints with provider configuration disabled. TypeScript, ESLint on changed frontend components, and an isolated Docker production build passed. Disposable Chromium exercised all four question types through their final frames, mobile width 390 px, light/dark themes, focus restoration, and request cancellation, with no page runtime errors. Physical iPad/Pencil behavior was not tested. Generated practice made no provider calls; the revised custom-extraction prompt was not revalidated with a live model during this implementation.
+
 ## Next work
 
 Validate native screenshot paste and review on the actual iPad; configure and exercise live tutoring. Consider math-specialized OCR for notation beyond simple printed algebra. Later inputs should feed the existing import/review/confirm boundary. Preserve cancellation, confirmation gating, and normal text editing. Add region-based handwriting context, precise annotations, generated visualizations, and persistence after the core demo works.
+
+### Paste-to-visualize update, 2026-09-20
+
+The current UI supersedes the generated-question selector described above. Paste plain text, select its textbox, and click Visualize. The modal never silently substitutes generated practice. Four copyable demo questions use whitespace-normalized exact matching before provider extraction; edits to their content use normal extraction. Screenshot confirmation and voice context remain separate.
+
+Verification for this update: TypeScript and targeted frontend ESLint passed; all eight backend regression tests passed. Disposable Chromium exercised all four pasted demo paragraphs through selection and modal rendering, empty-selection guidance, Escape, and a 390 px dark layout with no runtime errors. Physical iPad/Pencil and live custom-provider extraction were not tested. The existing graph lint failures remain outside this change.

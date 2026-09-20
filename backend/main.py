@@ -3,6 +3,7 @@ import hmac
 import json
 import math
 import os
+import random
 import uuid
 from typing import Any, Literal
 
@@ -31,7 +32,14 @@ app.add_middleware(
 
 class VisualizationRequest(BaseModel):
     problem: str = Field(min_length=1, max_length=12000)
-    topic: Literal["physics"]
+    topic: Literal["physics", "kinematics"]
+
+
+KINEMATICS_SCOPE = (
+    "Visualizations support one object moving in one direction with constant acceleration, "
+    "including braking to rest and downward free fall. Collisions, multiple objects, "
+    "and unknown launch-speed constraints are not supported. Try a generated kinematics question."
+)
 
 
 class PhysicsQuantity(BaseModel):
@@ -160,6 +168,21 @@ class VisualizationResponse(BaseModel):
         return self
 
 
+KinematicsKind = Literal["speed_up", "braking", "constant_speed", "free_fall"]
+
+
+class KinematicsQuestion(BaseModel):
+    problem: str
+    kind: KinematicsKind
+    visualization: VisualizationResponse
+
+
+@app.get("/visualize/question", response_model=KinematicsQuestion)
+def kinematics_question(kind: KinematicsKind = "speed_up") -> KinematicsQuestion:
+    # Text and frames share numeric inputs; no model extraction or API key needed.
+    return generate_kinematics_question(kind)
+
+
 @app.get("/")
 def read_root() -> dict[str, str]:
     return {"message": "Mimir API is running"}
@@ -172,6 +195,12 @@ def health_check() -> dict[str, str]:
 
 @app.post("/visualize", response_model=VisualizationResponse)
 async def create_visualization(request: VisualizationRequest) -> VisualizationResponse:
+    # Stable demo questions can be pasted and rendered without a provider call.
+    normalized = " ".join(request.problem.split())
+    for kind in ("speed_up", "braking", "constant_speed", "free_fall"):
+        demo = generate_kinematics_question(kind, random.Random(42))
+        if normalized == " ".join(demo.problem.split()):
+            return demo.visualization
     if not is_openrouter_visualization_configured():
         raise HTTPException(status_code=503, detail="OpenRouter visualization is not configured on the backend")
     try:
@@ -180,7 +209,7 @@ async def create_visualization(request: VisualizationRequest) -> VisualizationRe
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail="The visualization provider is unavailable")
     except (ValueError, TypeError):
-        raise HTTPException(status_code=422, detail="This problem could not be converted into a supported physics model")
+        raise HTTPException(status_code=422, detail=KINEMATICS_SCOPE)
 
 
 @app.get("/token")
@@ -282,8 +311,8 @@ def is_openrouter_visualization_configured() -> bool:
 async def extract_physics(request: VisualizationRequest) -> PhysicsExtraction:
     model = os.getenv("OPENROUTER_VISUALIZATION_MODEL", "inclusionai/ling-3.0-flash-vl:free")
     prompt = f"""
-Extract the known values from this Physics word problem so a deterministic backend can solve it.
-Topic: Physics
+Extract the known values from this single-object Kinematics word problem so a deterministic backend can solve it.
+Topic: One-dimensional kinematics
 Problem provided by the user:
 <problem>
 {request.problem}
@@ -300,6 +329,8 @@ Return only valid JSON with this exact shape:
 }}
 
 Rules:
+- If the problem involves multiple moving objects, collisions, a change of direction, variable acceleration, forces/energy, two-dimensional motion, or an unknown initial velocity, return {{"motion_type": "unsupported"}}. Never simplify such a problem into a single falling object.
+- Every known quantity must be an object with a numeric `value` and its `unit`, for example {{"value": 2, "unit": "m/s^2"}}. Unknown quantities must be null.
 - Extract values explicitly stated or directly implied by the problem. Use zero for "dropped" or "from rest", unless an explicit initial velocity is also provided; the explicit value wins.
 - Map a stated height to displacement. Map "acceleration of gravity" or a planet's gravity to acceleration.
 - Use `free_fall_1d` for dropped/falling objects and `constant_acceleration_1d` for other one-dimensional uniform acceleration.
@@ -307,6 +338,7 @@ Rules:
 - Preserve the units from the problem. Do not calculate acceleration, duration, positions, or frames.
 - Use null for quantities that are not given. Do not invent mass, force, or energy.
 - This first pipeline supports one-dimensional constant-acceleration motion only.
+- Use the direction of motion as positive. For downward free fall, velocity, displacement and gravity are positive. For braking, acceleration is negative. Only use gravity when its value is stated.
 """.strip()
     payload = {
         "model": model,
@@ -360,8 +392,14 @@ def build_visualization(extraction: PhysicsExtraction) -> VisualizationResponse:
     duration = unit_value(extraction.duration, "time") if extraction.duration else None
     acceleration = unit_value(extraction.acceleration, "acceleration") if extraction.acceleration else None
 
+    if initial_velocity < 0 or (duration is not None and duration <= 0):
+        raise ValueError("Initial speed must be nonnegative and duration positive")
+    if displacement is not None and displacement <= 0:
+        raise ValueError("Displacement must be positive in the direction of motion")
     if acceleration is None:
-        if duration is not None and displacement is not None:
+        if duration is not None and final_velocity is not None:
+            acceleration = (final_velocity - initial_velocity) / duration
+        elif duration is not None and displacement is not None:
             acceleration = 2 * (displacement - initial_velocity * duration) / duration**2
         elif final_velocity is not None and displacement is not None and displacement != 0:
             acceleration = (final_velocity**2 - initial_velocity**2) / (2 * displacement)
@@ -370,15 +408,35 @@ def build_visualization(extraction: PhysicsExtraction) -> VisualizationResponse:
     if final_velocity is None and duration is not None:
         final_velocity = initial_velocity + acceleration * duration
     if final_velocity is None and displacement is not None:
-        final_velocity = math.sqrt(max(0, initial_velocity**2 + 2 * acceleration * displacement))
+        speed_squared = initial_velocity**2 + 2 * acceleration * displacement
+        if speed_squared < -1e-9:
+            raise ValueError("The object cannot reach that displacement")
+        final_velocity = math.sqrt(max(0, speed_squared))
     if duration is None:
-        if final_velocity is None or acceleration == 0:
+        if acceleration == 0 and displacement is not None and initial_velocity > 0:
+            duration = displacement / initial_velocity
+        elif final_velocity is not None and acceleration != 0:
+            duration = (final_velocity - initial_velocity) / acceleration
+        else:
             raise ValueError("Not enough values to solve duration")
-        duration = (final_velocity - initial_velocity) / acceleration
     if duration <= 0:
         raise ValueError("The solved duration must be positive")
     if displacement is None:
         displacement = initial_velocity * duration + 0.5 * acceleration * duration**2
+    expected_velocity = initial_velocity + acceleration * duration
+    expected_displacement = initial_velocity * duration + 0.5 * acceleration * duration**2
+    if not all(math.isfinite(value) for value in (duration, displacement, acceleration, expected_velocity, expected_displacement)):
+        raise ValueError("Motion values must be finite")
+    if expected_velocity < -1e-9 or displacement <= 0:
+        raise ValueError("Direction changes are not supported")
+    if final_velocity is not None and not math.isclose(final_velocity, expected_velocity, rel_tol=1e-5, abs_tol=1e-6):
+        raise ValueError("Inconsistent final velocity")
+    if not math.isclose(displacement, expected_displacement, rel_tol=1e-5, abs_tol=1e-6):
+        raise ValueError("Inconsistent displacement")
+    final_velocity = expected_velocity
+    vertical = extraction.motion_type == "free_fall_1d"
+    if vertical and (acceleration <= 0 or initial_velocity != 0):
+        raise ValueError("Free fall must start from rest and move downward")
 
     frame_count = 9
     step = duration / (frame_count - 1)
@@ -388,9 +446,27 @@ def build_visualization(extraction: PhysicsExtraction) -> VisualizationResponse:
         time = step * index
         position = initial_velocity * time + 0.5 * acceleration * time**2
         velocity = initial_velocity + acceleration * time
-        truck_x = 100 + (position / displacement if displacement else 0) * 560
+        truck_x = 100 + position / displacement * 560
         arrow_start = truck_x + 38
-        arrow_length = min(35 + abs(velocity) / max_velocity * 100, max(35, 780 - arrow_start))
+        arrow_length = min(abs(velocity) / max_velocity * 100, max(0, 780 - arrow_start))
+        if vertical:
+            ball_y = 70 + position / displacement * 290
+            objects = [
+                VisualizationObject(id="ground", type="line", x=240, y=374, x2=550, y2=374, color="#8a938d"),
+                VisualizationObject(id="ball", type="circle", x=360, y=ball_y, radius=14, color="#2f9e44", label="ball"),
+                VisualizationObject(id="acceleration", type="arrow", x=480, y=ball_y, x2=480, y2=ball_y + 45, color="#e8590c", label="a"),
+            ]
+            if velocity > 1e-9:
+                objects.append(VisualizationObject(id="velocity", type="arrow", x=420, y=ball_y, x2=420, y2=ball_y + velocity / max_velocity * 55, color="#1971c2", label="v"))
+        else:
+            objects = [
+                VisualizationObject(id="ground", type="line", x=70, y=320, x2=760, y2=320, color="#8a938d"),
+                VisualizationObject(id="truck", type="rect", x=truck_x, y=270, width=76, height=42, color="#2f9e44", label="truck"),
+            ]
+            if velocity > 1e-9:
+                objects.append(VisualizationObject(id="velocity", type="arrow", x=arrow_start, y=250, x2=arrow_start + arrow_length, y2=250, color="#1971c2", label="v"))
+            if abs(acceleration) > 1e-9:
+                objects.append(VisualizationObject(id="acceleration", type="arrow", x=arrow_start, y=220, x2=arrow_start + math.copysign(50, acceleration), y2=220, color="#e8590c", label="a"))
         frames.append(VisualizationFrame(
             value=round(time, 3),
             variables=[
@@ -399,17 +475,61 @@ def build_visualization(extraction: PhysicsExtraction) -> VisualizationResponse:
                 VisualizationVariable(name="v", value=round(velocity, 3), unit="m/s"),
                 VisualizationVariable(name="a", value=round(acceleration, 3), unit="m/s²"),
             ],
-            objects=[
-                VisualizationObject(id="ground", type="line", x=70, y=320, x2=730, y2=320, color="#8a938d"),
-                VisualizationObject(id="truck", type="rect", x=truck_x, y=270, width=76, height=42, color="#2f9e44", label="truck"),
-                VisualizationObject(id="velocity", type="arrow", x=arrow_start, y=250, x2=arrow_start + arrow_length, y2=250, color="#1971c2", label="v"),
-                VisualizationObject(id="acceleration", type="arrow", x=arrow_start, y=220, x2=min(arrow_start + 50, 780), y2=220, color="#e8590c", label="a"),
-            ],
+            objects=objects,
         ))
     return VisualizationResponse(
-        timeline=VisualizationTimeline(name="t", unit="s", minimum=0, maximum=round(duration, 3), step=round(step, 3)),
+        timeline=VisualizationTimeline(name="t", unit="s", minimum=0, maximum=duration, step=step),
         frames=frames,
     )
+
+
+def generate_kinematics_question(kind: KinematicsKind, rng: random.Random | None = None) -> KinematicsQuestion:
+    rng = rng or random.SystemRandom()
+    duration = rng.randint(3, 10)
+    initial_velocity = rng.randint(0, 8)
+    acceleration = rng.randint(1, 4)
+    motion_type = "constant_acceleration_1d"
+    if kind == "speed_up":
+        problem = (
+            f"A truck travels in a straight line at {initial_velocity} m/s and accelerates "
+            f"uniformly at {acceleration} m/s² for {duration} s. "
+            "Find its final speed and the distance it travels during this time."
+        )
+    elif kind == "braking":
+        initial_velocity = acceleration * duration
+        problem = (
+            f"A truck travels at {initial_velocity} m/s on a straight road. It brakes "
+            f"uniformly and stops in {duration} s. Find its acceleration and stopping distance."
+        )
+        acceleration = -acceleration
+    elif kind == "constant_speed":
+        initial_velocity = rng.randint(2, 15)
+        acceleration = 0
+        problem = (
+            f"A truck travels in a straight line at a constant speed of {initial_velocity} m/s "
+            f"for {duration} s. How far does it travel?"
+        )
+    elif kind == "free_fall":
+        duration = rng.randint(1, 4)
+        initial_velocity = 0
+        acceleration = 9.8
+        motion_type = "free_fall_1d"
+        height = 0.5 * acceleration * duration**2
+        problem = (
+            f"A ball is dropped from rest from a height of {height:g} m. "
+            "Ignore air resistance and use g = 9.8 m/s². "
+            "Find the time it takes to reach the ground and its speed just before impact. "
+            "Take downward as positive."
+        )
+    else:
+        raise ValueError("Unsupported kinematics question kind")
+    extraction = PhysicsExtraction.model_validate({
+        "motion_type": motion_type,
+        "initial_velocity": initial_velocity,
+        "acceleration": acceleration,
+        "duration": duration,
+    })
+    return KinematicsQuestion(problem=problem, kind=kind, visualization=build_visualization(extraction))
 
 
 def strip_json_fence(value: str) -> str:

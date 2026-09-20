@@ -145,6 +145,10 @@ The existing Canvas 2D renderer paints a 20-world-unit grid. The single “Paste
 
 Select, Pen, Eraser, and Text are the exposed tools. Select supports click/Shift-click selection, marquee selection, multi-element movement, and corner resizing; the pasted screenshot is selectable and transformable as well. Text mode supports tap-to-create and tap-to-edit, Done/Enter to save, Shift+Enter for a new line, and Escape/Cancel to discard edits. Text uses the selected ink color and participates in undo/redo and erasing. Finger taps create text in Text mode; finger navigation remains available with the other tools. Buttons are 42 px high (40 px minimum width on phones); the selected tool uses pale green. Ink options open in an anchored 320 px popover (300 px on phones), close outside or with Escape, and retain all eight colors and three widths. Undo/redo buttons show disabled state when unavailable.
 
+### Kinematics visualization
+
+Paste plain text onto the canvas, select its textbox, and click Visualize to open the kinematics modal. Pasted text wraps to the viewport and participates in undo/redo; Select becomes active without automatically selecting the textbox. A selected screenshot uses its confirmed question. With no valid selection, the modal explains the paste/select action; it never generates a replacement question. Premade demo questions live in [docs/DEMO_PROBLEMS.md](docs/DEMO_PROBLEMS.md). The modal retains timeline controls, cancellation, focus restoration, and an inert background.
+
 ### Voice and recognition
 
 Voice lives in the sidebar footer, with a status label, Talk/End button, pending state, and recoverable error. The small waveform animates only while speaking. The Tutor island floats at the side of the canvas and opens the panel before or after question confirmation. Closing the sidebar retains a voice session; editing or replacing a question ends it. Confirmed text is optional context, not a prerequisite for starting voice.

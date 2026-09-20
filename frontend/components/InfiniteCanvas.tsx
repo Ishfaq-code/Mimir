@@ -1041,12 +1041,52 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
     render();
   }, [pushHistory, render]);
 
+  useEffect(() => {
+    const pasteText = (event: ClipboardEvent) => {
+      if (document.querySelector('[aria-modal="true"]') ||
+          (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable=true]'))) return;
+      if (Array.from(event.clipboardData?.items ?? []).some(item => item.type.startsWith("image/"))) return;
+      const text = event.clipboardData?.getData("text/plain").trim();
+      const canvas = canvasRef.current;
+      const ctx = ctxRef.current;
+      if (!text || !canvas || !ctx) return;
+      event.preventDefault();
+      const camera = cameraRef.current;
+      const fontSize = 20;
+      const maxWidth = Math.max(160, Math.min(560, (canvas.clientWidth - 64) / camera.zoom));
+      ctx.save();
+      ctx.font = `${fontSize}px sans-serif`;
+      const lines: string[] = [];
+      for (const paragraph of text.split("\n")) {
+        let line = "";
+        for (const word of paragraph.split(/\s+/)) {
+          const next = line ? `${line} ${word}` : word;
+          if (line && ctx.measureText(next).width > maxWidth) { lines.push(line); line = word; }
+          else line = next;
+        }
+        lines.push(line);
+      }
+      const width = Math.max(10, ...lines.map(line => ctx.measureText(line).width));
+      ctx.restore();
+      elementsRef.current.push({ id: genId(), type: "text", x: camera.x + 32 / camera.zoom,
+        y: camera.y + 76 / camera.zoom, width, height: lines.length * fontSize * 1.2,
+        text: lines.join("\n"), fontSize, style: { ...styleRef.current }, isDeleted: false });
+      selectedRef.current.clear();
+      selectedScreenshotRef.current = false;
+      setTool("select");
+      pushHistory();
+      render();
+    };
+    window.addEventListener("paste", pasteText);
+    return () => window.removeEventListener("paste", pasteText);
+  }, [pushHistory, render, setTool]);
+
   const visualizeSelection = useCallback(() => {
     const selectedText = elementsRef.current.find((element): element is TextElement =>
       selectedRef.current.has(element.id) && element.type === "text" && !element.isDeleted,
     );
-    const problem = selectedText?.text.trim() || confirmedQuestion?.trim();
-    if (problem) onVisualizeRequest(problem);
+    const problem = selectedText?.text.trim() || (selectedScreenshotRef.current ? confirmedQuestion?.trim() : "");
+    onVisualizeRequest(problem || "");
   }, [confirmedQuestion, onVisualizeRequest]);
 
   // ── effects ─────────────────────────────────────────────────────
@@ -1127,6 +1167,7 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
   // keyboard shortcuts
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
+      if (canvasRef.current?.closest("[inert]")) return;
       // skip while editing text
       if (editingText || (e.target instanceof Element && e.target.closest("input, textarea, select, button, [contenteditable=true]"))) return;
       const k = e.key.toLowerCase();

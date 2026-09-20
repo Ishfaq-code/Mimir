@@ -6,6 +6,8 @@ Mimir is an iPad-oriented AI math tutor project: students write on an infinite c
 
 Screenshot OCR uses Tesseract.js in a browser worker and needs no API key. It is intended for printed English and simple algebra. Fractions, exponents, diagrams, and handwriting can need manual correction. Nothing is uploaded for OCR. Confirmed text is shared with the voice tutor only when a voice session is started. MyScript handwriting conversion and LiveKit/OpenAI voice still require their own provider configuration. Selecting a canvas textbox and choosing Visualize uses OpenRouter Ling 3.0 Flash VL to extract physics inputs, then the backend deterministically calculates and renders the discrete animation. Reload clears the visit.
 
+Visualize is limited to **single-object kinematics**: speeding up, braking to rest, constant speed, and downward free fall. Paste a problem as plain text onto the canvas, select the resulting textbox, then click **Visualize** to see the modal. [Premade demo questions](docs/DEMO_PROBLEMS.md) work without a provider key; other custom problems use OpenRouter extraction. Multiple-object collisions, direction changes, and unknown launch-speed constraints are unsupported.
+
 ## Project references
 
 - [Product requirements](PRODUCT.md): audience, teaching behavior, demo scope, and decisions already made.
@@ -85,10 +87,16 @@ npm run build
 npm run lint
 ```
 
-Lint and TypeScript checks passed during the frontend revamp; see the dated [verification record](docs/PROJECT_CONTEXT.md#verification-record). No automated test script is configured. For app changes, also inspect the affected behavior in the browser, and test Pencil/touch/audio changes on the actual iPad.
+Lint and TypeScript checks passed during the frontend revamp; see the dated [verification record](docs/PROJECT_CONTEXT.md#verification) for current results and known graph lint failures. No frontend automated test script is configured. For app changes, also inspect the affected behavior in the browser, and test Pencil/touch/audio changes on the actual iPad.
 
 Backend health:
 
 ```bash
 curl -fsS http://localhost:8000/health
+```
+
+Kinematics regression checks (including 200 generated question/animation pairs):
+
+```bash
+docker compose exec -T backend python -m unittest test_kinematics -v
 ```

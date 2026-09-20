@@ -31,8 +31,9 @@ Success for the demo means the student can work through a pasted algebra questio
 | Problem source | Paste a screenshot onto the canvas. OCR it, ask the student to confirm or correct the question, and tutor only from the confirmed text. Other input methods come later. |
 | Completion | Help the student reach a correct answer. |
 | Constraints | Fast hackathon iteration, reuse existing tools/APIs when useful, approximately $20 total API budget. |
+| Kinematics practice | Generate single-object questions with matching, validated visualizations: speeding up, braking to rest, constant speed, and downward free fall. Multiple bodies, collisions, direction reversals, and unknown launch-speed constraints are outside this visualization scope. |
 
-The screenshot flow supersedes the earlier preset algebra questions. Keep interface copy limited to necessary controls, review prompts, and actionable status/errors. Typing is allowed for OCR corrections and optional canvas textboxes. Freehand math remains the main solving interaction.
+Students may also paste a plain-text problem onto the canvas, select its textbox, and open Visualize. Premade kinematics questions are copyable demo material, not a question selector. The screenshot flow supersedes the earlier preset algebra questions. The user explicitly added generated kinematics practice on 2026-09-20, retained as copyable demo questions. Keep interface copy limited to necessary controls, review prompts, and actionable status/errors. Typing is allowed for OCR corrections and optional canvas textboxes. Freehand math remains the main solving interaction.
 
 The original time budget was 24 hours. That was a historical constraint, not a live countdown. No sponsor requirements were specified.
 
@@ -55,7 +56,7 @@ The user's examples establish a conversational, guiding tutor voice: brief quest
 - **Typed math as the primary student input.** A text field must not replace the handwritten working surface.
 - **Unrequested full solutions.** Guide the student first; use demonstrations when they need them.
 - **Teacher dashboards before the core tutor works.** Reporting must not displace the demo's main learning loop.
-- **Filler text and preset problem menus.** The student brings their question. Remove slogans and redundant instructions.
+- **Filler text and preset problem menus.** The student normally brings their question; copyable kinematics demo questions are the requested exception. Remove slogans and redundant instructions.
 
 These are product constraints from the conversation, not a newly imposed aesthetic brief.
 

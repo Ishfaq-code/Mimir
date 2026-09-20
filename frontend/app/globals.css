@@ -164,6 +164,13 @@ button { transition: background-color 160ms ease-out, color 160ms ease-out, opac
 .visualize-heading { display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--line); }
 .visualize-heading h2 { margin:0;font-size:16px;font-weight:600; }
 .visualize-body { padding:20px; }
+.visualize-scope { margin:0 0 14px;color:var(--muted);font-size:13px;line-height:1.6; }
+.visualize-generator { display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:18px; }
+.visualize-generator label { font-size:12px;color:var(--muted); }
+.visualize-generator select { min-height:42px;min-width:0;max-width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font:inherit;font-size:16px; }
+.visualize-generator select:focus-visible { outline:2px solid var(--accent);outline-offset:3px; }
+.visualize-generator .secondary-button { width:auto;min-height:42px; }
+.visualization-result { margin-top:18px; }
 .visualize-problem { padding:14px 16px;border:1px solid var(--line);border-radius:8px;background:var(--paper); }
 .visualize-problem p { margin:7px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;line-height:1.7; }
 .visualize-loading { display:flex;align-items:center;gap:8px;margin-top:20px;color:var(--muted);font-size:13px; }

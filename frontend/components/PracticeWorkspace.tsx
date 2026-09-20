@@ -17,7 +17,6 @@ function subscribeViewport(callback: () => void) {
 const getWideViewport = () => window.matchMedia(wideQuery).matches;
 const getServerViewport = () => true;
 type VisualizationStatus = "loading" | "success" | "error";
-
 export default function PracticeWorkspace() {
   const [dark, setDark] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -28,6 +27,7 @@ export default function PracticeWorkspace() {
   const [visualization, setVisualization] = useState<VisualizationData | null>(null);
   const [visualizationError, setVisualizationError] = useState("");
   const [visualizationRevision, setVisualizationRevision] = useState(0);
+  const visualizationDialogRef = useRef<HTMLElement>(null);
   const visualizationAbortRef = useRef<AbortController | null>(null);
   const visualizationRequestIdRef = useRef(0);
   const question = useScreenshotQuestion();
@@ -46,17 +46,18 @@ export default function PracticeWorkspace() {
     setVisualizationStatus("loading");
     setVisualization(null);
     setVisualizationError("");
+    setVisualizationProblem(problem);
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? process.env.NEXT_PUBLIC_TOKEN_URL ?? `${window.location.protocol}//${window.location.hostname}:8000`;
       const response = await fetch(`${apiUrl}/visualize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ problem, topic: "physics" }),
+        body: JSON.stringify({ problem, topic: "kinematics" }),
         cache: "no-store",
         signal: controller.signal,
       });
-      const body = await response.json() as VisualizationData | { detail?: string };
-      if (!response.ok) throw new Error("detail" in body && body.detail ? body.detail : "The visualization could not be generated.");
+      const body = await response.json() as VisualizationData | { detail?: unknown };
+      if (!response.ok) throw new Error("detail" in body && typeof body.detail === "string" ? body.detail : "The visualization could not be generated.");
       if (controller.signal.aborted || requestId !== visualizationRequestIdRef.current) return;
       setVisualization(body as VisualizationData);
       setVisualizationStatus("success");
@@ -74,7 +75,11 @@ export default function PracticeWorkspace() {
     setVisualization(null);
     setVisualizationError("");
     setVisualizationOpen(true);
-    void requestVisualization(problem);
+    if (problem) void requestVisualization(problem);
+    else {
+      setVisualizationStatus("error");
+      setVisualizationError("Paste your problem onto the canvas, select its textbox, then click Visualize.");
+    }
   }, [requestVisualization]);
 
   const closeVisualization = useCallback(() => {
@@ -89,11 +94,24 @@ export default function PracticeWorkspace() {
 
   useEffect(() => {
     if (!visualizationOpen) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = visualizationDialogRef.current;
+    dialog?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeVisualization();
+      if (event.key === "Tab" && dialog) {
+        const controls = Array.from(dialog.querySelectorAll<HTMLElement>("button:not(:disabled), select, input, [tabindex='0']"));
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+          event.preventDefault(); last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault(); first?.focus();
+        }
+      }
     };
     window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
+    return () => { window.removeEventListener("keydown", closeOnEscape); previousFocus?.focus(); };
   }, [closeVisualization, visualizationOpen]);
 
   useEffect(() => () => {
@@ -107,6 +125,7 @@ export default function PracticeWorkspace() {
 
   useEffect(() => {
     const paste = (event: ClipboardEvent) => {
+      if (visualizationOpen) return;
       if (event.target instanceof Element && event.target.closest("input, textarea, [contenteditable=true]")) return;
       const image = Array.from(event.clipboardData?.items ?? []).find(item => item.type.startsWith("image/"))?.getAsFile();
       if (!image) return;
@@ -115,7 +134,7 @@ export default function PracticeWorkspace() {
     };
     window.addEventListener("paste", paste);
     return () => window.removeEventListener("paste", paste);
-  }, [acceptImage]);
+  }, [acceptImage, visualizationOpen]);
 
   useEffect(() => {
     if (question.phase === "review" && panelOpen) reviewHeadingRef.current?.focus();
@@ -144,14 +163,14 @@ export default function PracticeWorkspace() {
 
   return (
     <div className={`practice-app tutor-${panelOpen ? "open" : "closed"}`} data-theme={dark ? "dark" : "light"}>
-      <header className="app-header">
+      <header className="app-header" inert={visualizationOpen}>
         <div className="wordmark" aria-label="Mimir"><span className="brand-symbol"><MimirMark /></span>mimir<span className="brand-period">.</span></div>
         <div className="header-actions">
           <button className="paste-button" aria-label="Paste screenshot" onClick={() => void pasteScreenshot()} disabled={pasting}><Icon name="clipboard" size={17}/><span>Paste screenshot</span></button>
           <button className="icon-button theme-toggle" onClick={() => setDark(value => !value)} aria-label={dark ? "Use light theme" : "Use dark theme"}><Icon name={dark ? "sun" : "moon"} size={19}/></button>
         </div>
       </header>
-      <div className="workspace-layout">
+      <div className="workspace-layout" inert={visualizationOpen}>
         <button
           ref={tutorToggleRef}
           className="tutor-island"
@@ -184,12 +203,13 @@ export default function PracticeWorkspace() {
         </aside>
       </div>
       {visualizationOpen && <div className="visualize-backdrop" role="presentation" onMouseDown={closeVisualization}>
-        <section className="visualize-modal" role="dialog" aria-modal="true" aria-labelledby="visualize-title" onMouseDown={event => event.stopPropagation()}>
-          <div className="visualize-heading"><h2 id="visualize-title">Visualize word problem</h2><button className="icon-button" type="button" onClick={closeVisualization} aria-label="Close visualization"><Icon name="close" size={18}/></button></div>
+        <section ref={visualizationDialogRef} tabIndex={-1} className="visualize-modal" role="dialog" aria-modal="true" aria-labelledby="visualize-title" onMouseDown={event => event.stopPropagation()}>
+          <div className="visualize-heading"><h2 id="visualize-title">Kinematics</h2><button className="icon-button" type="button" onClick={closeVisualization} aria-label="Close visualization"><Icon name="close" size={18}/></button></div>
           <div className="visualize-body">
-            <div className="visualize-problem"><span className="eyebrow">WORD PROBLEM</span><p>{visualizationProblem}</p></div>
+            <p className="visualize-scope">One object, constant acceleration. Practice speeding up, braking, constant speed, or free fall.</p>
+            {visualizationProblem && <div className="visualize-problem"><span className="eyebrow">YOUR QUESTION</span><p>{visualizationProblem}</p></div>}
             {visualizationStatus === "loading" && <div className="visualize-loading" role="status"><span className="review-dot"/>Building the visualization…</div>}
-            {visualizationStatus === "error" && <div className="visualize-error" role="alert"><p>{visualizationError}</p><button className="primary-button" type="button" onClick={() => void requestVisualization(visualizationProblem)}>Try again</button></div>}
+            {visualizationStatus === "error" && <div className="visualize-error" role="alert"><p>{visualizationError}</p>{visualizationProblem && <button className="primary-button" type="button" onClick={() => void requestVisualization(visualizationProblem)}>Try again</button>}</div>}
             {visualizationStatus === "success" && visualization && <VisualizationResult key={visualizationRevision} data={visualization}/>}
           </div>
         </section>
