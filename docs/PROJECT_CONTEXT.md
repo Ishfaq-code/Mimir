@@ -78,7 +78,7 @@ The handwritten expression recognizer still treats the entire freehand scene as 
 
 ## Runtime
 
-See [README.md](../README.md). Next.js 16.3.5 / React 19 / TypeScript, Tesseract.js 7, KaTeX, LiveKit client. FastAPI backend and separate Python LiveKit agent. Docker uses Node 22 / Python 3.12. Frontend production is on port 3000, backend on 8000. Rebuild the frontend container for changes; the backend mounts source with reload. Run `npm run dev` for hot reload.
+See [README.md](../README.md). Next.js 16.3.5 / React 19 / TypeScript, Tesseract.js 7, KaTeX, LiveKit client. FastAPI backend and separate Python LiveKit agent. Docker uses Node 22 / Python 3.12. Frontend dev is on port 3000, backend on 8000. Both Compose services hot-reload from source mounts: the backend with Uvicorn `--reload`, the frontend with `next dev` (Turbopack) plus a named `node_modules` volume. After dependency changes, run `docker compose exec frontend npm install` or `docker compose down -v && docker compose up --build`; the production image remains the Dockerfile's default target.
 
 - Recognition is opt-in. `/ws/latex` round-trips request and stroke IDs with structured strokes so each response maps back to its source ink.
 - The current pipeline groups unrecognized strokes completed within the configured pause into one expression. It can retain multiple recognized overlays, but does not semantically segment lines, regions, or individual symbols.

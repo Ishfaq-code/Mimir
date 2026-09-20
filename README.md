@@ -25,9 +25,17 @@ Start both services from the repository root:
 docker compose up --build
 ```
 
-The Compose backend runs Uvicorn with `--reload` and mounts `./backend`, so
-Python changes are picked up without rebuilding the image. Use `docker compose
-up -d --build backend` when changing backend dependencies; restarting alone does not install them.
+Both Compose services hot-reload: the backend runs Uvicorn with `--reload`
+and mounts `./backend`, and the frontend runs `next dev` (Turbopack) and
+mounts `./frontend`, so source edits appear without rebuilding. Rebuild the
+image after changing backend dependencies. After changing frontend
+dependencies, refresh the container's installed modules:
+
+```bash
+docker compose exec frontend npm install
+```
+
+or start clean with `docker compose down -v && docker compose up --build`.
 
 The services are available at:
 
@@ -42,17 +50,14 @@ Stop the services with:
 docker compose down
 ```
 
-The frontend container runs a production build without a source mount. To show frontend changes in Docker:
-
-```bash
-docker compose up -d --build --no-deps frontend
-```
-
-Reload a disposable test tab after rebuilding. Preserve any user drawing before reloading its tab.
+The frontend Dockerfile still produces the standalone production image as
+its default target for deployment; Compose builds its `dev` stage instead.
 
 ## Frontend development with hot reload
 
-Use Node.js 22 to match the Docker image. If Docker currently occupies port 3000, stop its frontend first:
+Docker already provides hot reload as described above. To run the dev server
+outside Docker instead, use Node.js 22 to match the Docker image. If Docker
+currently occupies port 3000, stop its frontend first:
 
 ```bash
 docker compose stop frontend
