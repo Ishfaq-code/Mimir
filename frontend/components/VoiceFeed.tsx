@@ -7,7 +7,7 @@ import Icon from "./Icon";
 
 type Session = ReturnType<typeof useTutorSession>;
 export default function VoiceFeed({ session }: { session: Session }) {
-  const checking = useSyncExternalStore(subscribeTutorStatus, getTutorStatus, () => "ready") === "checking";
+  const tutorStatus = useSyncExternalStore(subscribeTutorStatus, getTutorStatus, () => "ready");
   const preferences = useLearningPreferences();
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -30,7 +30,7 @@ export default function VoiceFeed({ session }: { session: Session }) {
   return <section className="voice-companion" aria-label="Conversation with Mimir" data-paused={session.paused}>
     <div className="voice-feed-heading">
       <span className="voice-live-dot"/>
-      <span>{session.paused ? "Take your time" : checking ? "Checking your work…" : "Mimir is with you"}</span>
+      <span role="status">{session.paused ? "Take your time" : tutorStatus === "waiting" ? "Waiting for your pen…" : tutorStatus === "checking" ? "Checking your work…" : "Mimir is with you"}</span>
       <button className="icon-button" onClick={() => setHistory(value => !value)} aria-label={history ? "Hide conversation history" : "Show conversation history"} aria-expanded={history}><Icon name="tutor" size={16}/></button>
     </div>
     {(preferences.captions || history) && <div className={`voice-lines ${history ? "voice-history" : ""}`} role="log" aria-label="Live conversation captions" aria-live="polite" aria-relevant="additions text">

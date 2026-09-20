@@ -5,7 +5,7 @@ from time import perf_counter
 
 from livekit.agents import Agent
 from prompts import TUTOR_INSTRUCTIONS
-from planner import Planner
+from planner import Planner, speech_without_scaffold
 from tools.canvas import CanvasRpc
 from preparation import BoardPreparation
 from fast_turn import is_hint_request, fast_answer, numeric_answer, anticipated_confirmation
@@ -141,6 +141,7 @@ class MathTutor(Agent):
 
     async def _respond(self, text: str, epoch: int):
         self._request_started = perf_counter()
+        self._failure_stage = 'capture'
         try:
             control = conversation_control(text)
             if control:
@@ -153,85 +154,124 @@ class MathTutor(Agent):
                 }[control]
                 await self._speak(speech)
                 return
-            async def interrupt():
-                # LiveKit returns a Future; TaskGroup requires a coroutine.
-                await self.session.interrupt(force=True)
-            preparation=getattr(self,'_preparation',None)
-            status={};prepared=None;plan=None;route='live'
-            if preparation:
-                async with asyncio.TaskGroup() as tasks:
-                    tasks.create_task(interrupt())
-                    status_task=tasks.create_task(self._canvas.call('get_board_status',{}))
-                status=status_task.result()
-                revision=status.get('revision')
-                if status.get('ready') and revision:
-                    if is_hint_request(text):
-                        if preparation.revision!=revision:preparation.begin(revision)
-                        if not preparation.ready:
-                            await self._canvas.call('set_tutor_status',{'status':'checking'})
-                        prepared=await preparation.take(revision)
-                    elif preparation.ready and preparation.revision==revision:
-                        prepared=preparation.ready
-                self._slower=bool(status.get('preferences',{}).get('slowerVoice'))
-            if prepared:
-                state,view,image=prepared.state,prepared.view,prepared.image
-                if is_hint_request(text):plan=prepared.plan.model_copy(deep=True);route='prepared'
-            else:
-                # Capture is memoized in the browser until the source revision changes.
-                async with asyncio.TaskGroup() as tasks:
-                    tasks.create_task(interrupt())
-                    tasks.create_task(self._canvas.call('set_tutor_status', {'status':'checking'}))
-                    state_task = tasks.create_task(self._canvas.call('get_canvas_state', {}))
-                    capture_task = tasks.create_task(self._canvas.capture())
-                state=state_task.result();view,image=capture_task.result()
-            captured = perf_counter()
-            self._slower = bool(status.get('preferences',state.get('preferences', {})).get('slowerVoice'))
-            if plan is None and getattr(self,'_last_plan',None) and self._last_plan_revision==view.get('revision'):
-                plan=fast_answer(text,self._last_plan,view)
-                if plan:route='local-answer'
-            if plan is None and numeric_answer(text) is not None:
-                previous=getattr(self,'_last_plan',None)
-                logger.info('Local answer unavailable: prior_hint=%s focus_present=%s same_revision=%s',
-                            bool(previous and previous.status=='hint'),bool(previous and previous.focus_expression),
-                            bool(previous and self._last_plan_revision==view.get('revision')))
-            if plan is None:
-                # Prioritize a specific question over speculative background work.
-                if preparation:preparation.invalidate()
-                plan = await self._planner.plan(text, state, view, image, self._history, self._active)
-            checked = perf_counter()
-            if epoch != self._epoch or self.session.userdata.paused: return
-            if self.session.user_state == 'speaking': return
-            # Atomic board revision check + mark/scaffold placement. No stale advice.
-            result = await self._canvas.call('apply_teaching_plan', {
-                'snapshotId':view['snapshotId'], 'problemRegionIds':plan.problem_region_ids,
-                'regionIds':plan.highlight_region_ids, 'label':plan.highlight_label,
-                'scaffold':plan.scaffold.template if plan.scaffold else None,
-            })
-            if not result.get('success'):
-                await self._speak('Your board changed while I was checking. Finish that line, then ask me again so I use your latest work.')
-                return
-            speech = plan.speech
-            if plan.scaffold and not result.get('scaffoldPlaced'):
-                speech = 'That step checks out. Leave a little empty space beside your work, then ask me for the next step.'
-            self._active = {'problem':plan.problem, 'bounds':result.get('problemBounds')} if plan.problem_region_ids else None
-            self._history.extend([{'role':'student','text':text}, {'role':'tutor','text':speech}])
-            self._history = self._history[-8:]
-            if plan.status!='incorrect':
-                self._last_plan=plan;self._last_plan_revision=view.get('revision')
-            logger.info('Checked turn: status=%s checks=%d scaffold=%s', plan.status, len(plan.checks), bool(result.get('scaffoldPlaced')))
-            logger.info('Turn timing: turn=%d route=%s board_or_preparation_seconds=%.2f check_seconds=%.2f apply_seconds=%.2f',
-                        epoch,route,captured-self._request_started,checked-captured,perf_counter()-checked)
-            await asyncio.gather(self._canvas.call('set_tutor_status', {'status':'ready'}), self._speak(speech))
+            await self.session.interrupt(force=True)
+            while epoch == self._epoch and not self.session.userdata.paused:
+                status = await self._wait_for_board(epoch)
+                if status is None: return
+                if await self._check_current_board(text, epoch, status): return
+                # The student resumed writing during capture/checking. Keep their
+                # request, discard the old plan, then capture after the next pause.
+                preparation = getattr(self, '_preparation', None)
+                if preparation: preparation.invalidate()
+                await asyncio.sleep(.25)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             logger.warning('Checked turn could not complete: %s', type(exc).__name__)
             if epoch == self._epoch and not self.session.userdata.paused:
                 try:
-                    await self._speak("I couldn't get a reliable check of that step. Can you bring the problem into view and tell me which part to check?")
+                    speech = ("I couldn't refresh the canvas for a reliable check just now. Could you try checking that step again?"
+                              if self._failure_stage == 'capture' else
+                              "I couldn't verify that step reliably. Can you read the part you want me to check?")
+                    await self._speak(speech)
                 except Exception:
                     logger.warning('Unable to deliver recovery line')
         finally:
             if epoch == self._epoch and not self.session.userdata.paused:
                 try: await self._canvas.call('set_tutor_status', {'status':'ready'})
                 except Exception: pass
+
+    async def _wait_for_board(self, epoch: int) -> dict | None:
+        waiting = False
+        while epoch == self._epoch and not self.session.userdata.paused:
+            status = await self._canvas.call('get_board_status', {})
+            if status.get('available') is False:
+                raise RuntimeError('Canvas is no longer available')
+            if status.get('ready'):
+                await self._canvas.call('set_tutor_status', {'status': 'checking'})
+                return status
+            if 'ready' not in status:
+                raise RuntimeError('Canvas readiness is unavailable')
+            if not waiting:
+                await self._canvas.call('set_tutor_status', {'status': 'waiting'})
+                waiting = True
+            # No images or model calls until the browser reports settled ink.
+            await asyncio.sleep(.3)
+        return None
+
+    async def _check_current_board(self, text: str, epoch: int, status: dict) -> bool:
+        preparation=getattr(self,'_preparation',None)
+        prepared=None;plan=None;route='live'
+        if preparation:
+            revision=status.get('revision')
+            if status.get('ready') and revision:
+                if is_hint_request(text):
+                    if preparation.revision!=revision:preparation.begin(revision)
+                    if not preparation.ready:
+                        await self._canvas.call('set_tutor_status',{'status':'checking'})
+                    prepared=await preparation.take(revision)
+                elif preparation.ready and preparation.revision==revision:
+                    prepared=preparation.ready
+            self._slower=bool(status.get('preferences',{}).get('slowerVoice'))
+        if prepared:
+            state,view,image=prepared.state,prepared.view,prepared.image
+            if is_hint_request(text):plan=prepared.plan.model_copy(deep=True);route='prepared'
+        else:
+            # Capture is memoized in the browser until the source revision changes.
+            try:
+                async with asyncio.TaskGroup() as tasks:
+                    tasks.create_task(self._canvas.call('set_tutor_status', {'status':'checking'}))
+                    state_task = tasks.create_task(self._canvas.call('get_canvas_state', {}))
+                    capture_task = tasks.create_task(self._canvas.capture())
+                state=state_task.result();view,image=capture_task.result()
+            except Exception:
+                latest = await self._canvas.call('get_board_status', {})
+                if not latest.get('ready') or latest.get('revision') != status.get('revision'):
+                    return False
+                raise
+        captured = perf_counter()
+        self._slower = bool(status.get('preferences',state.get('preferences', {})).get('slowerVoice'))
+        if plan is None and getattr(self,'_last_plan',None) and self._last_plan_revision==view.get('revision'):
+            plan=fast_answer(text,self._last_plan,view)
+            if plan:route='local-answer'
+        if plan is None and numeric_answer(text) is not None:
+            previous=getattr(self,'_last_plan',None)
+            logger.info('Local answer unavailable: prior_hint=%s focus_present=%s same_revision=%s',
+                        bool(previous and previous.status=='hint'),bool(previous and previous.focus_expression),
+                        bool(previous and self._last_plan_revision==view.get('revision')))
+        if plan is None:
+            # Prioritize a specific question over speculative background work.
+            if preparation:preparation.invalidate()
+            self._failure_stage = 'math'
+            plan = await self._planner.plan(text, state, view, image, self._history, self._active)
+        checked = perf_counter()
+        if epoch != self._epoch or self.session.userdata.paused: return True
+        if self.session.user_state == 'speaking': return True
+        # Atomic board revision check + mark/scaffold placement. No stale advice.
+        try:
+            result = await self._canvas.call('apply_teaching_plan', {
+                'snapshotId':view['snapshotId'], 'problemRegionIds':plan.problem_region_ids,
+                'regionIds':plan.highlight_region_ids, 'label':plan.highlight_label,
+                'scaffold':plan.scaffold.template if plan.scaffold else None,
+            })
+        except Exception as exc:
+            logger.warning('Annotation failed after math check: %s', type(exc).__name__)
+            result = {'success': False, 'error': 'annotation_unavailable'}
+        if not result.get('success'):
+            if result.get('error') == 'stale_snapshot_look_again': return False
+            current = await self._canvas.call('get_board_status', {})
+            if not current.get('ready') or current.get('revision') != view.get('revision'): return False
+            logger.warning('Annotation declined after math check: %s', result.get('error'))
+        speech = plan.speech
+        if plan.scaffold and not result.get('scaffoldPlaced'):
+            speech = speech_without_scaffold(plan)
+        self._active = {'problem':plan.problem, 'bounds':result.get('problemBounds')} if plan.problem_region_ids else None
+        self._history.extend([{'role':'student','text':text}, {'role':'tutor','text':speech}])
+        self._history = self._history[-8:]
+        if plan.status!='incorrect':
+            self._last_plan=plan;self._last_plan_revision=view.get('revision')
+        logger.info('Checked turn: status=%s checks=%d scaffold=%s', plan.status, len(plan.checks), bool(result.get('scaffoldPlaced')))
+        logger.info('Turn timing: turn=%d route=%s board_or_preparation_seconds=%.2f check_seconds=%.2f apply_seconds=%.2f',
+                    epoch,route,captured-self._request_started,checked-captured,perf_counter()-checked)
+        await asyncio.gather(self._canvas.call('set_tutor_status', {'status':'ready'}), self._speak(speech))
+        return True

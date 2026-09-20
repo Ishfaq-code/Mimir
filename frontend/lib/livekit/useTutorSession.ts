@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ConnectionState, ParticipantEvent, Room, RoomEvent, Track, type RemoteParticipant } from "livekit-client";
 import { registerCanvasRpcs } from "./rpc";
+import { connectWithRetry, waitForTutor } from "./startup";
 import { tutorCanvas } from "../tutor/tutorCanvas";
 import { clearHighlight, setTutorStatus } from "../tutor/boardView";
 import { setPaused as publishPaused } from "../tutor/support";
@@ -19,7 +20,7 @@ export function useTutorSession() {
   const attemptRef = useRef(0);
   const audioRef = useRef<HTMLMediaElement[]>([]);
   const pausedRef = useRef(false);
-  const joinTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const connectingRef = useRef<AbortController | null>(null);
   const [status, setStatus] = useState<VoiceStatus>("disconnected");
   const [error, setError] = useState<string | null>(null);
   const [everConnected, setEverConnected] = useState(false);
@@ -31,21 +32,27 @@ export function useTutorSession() {
   const connected = status !== "disconnected" && status !== "error";
   const ready = connected && status !== "connecting";
 
-  const disconnect = useCallback(async () => {
-    attemptRef.current++;
-    clearTimeout(joinTimer.current);
+  const releaseRoom = useCallback(async () => {
     const room = roomRef.current;
     roomRef.current = null;
     for (const el of audioRef.current) { el.pause(); el.remove(); }
     audioRef.current = [];
+    if (room) await room.disconnect();
+  }, []);
+
+  const disconnect = useCallback(async () => {
+    attemptRef.current++;
+    connectingRef.current?.abort();
+    connectingRef.current = null;
+    const closing = releaseRoom();
     pausedRef.current = false;
     publishPaused(false);
     setPaused(false); setMic(false); setBusy(false); setAudioBlocked(false);
-    setStatus("disconnected");
+    setStatus("disconnected"); setError(null);
     clearHighlight();
     setTutorStatus("ready");
-    if (room) await room.disconnect();
-  }, []);
+    await closing;
+  }, [releaseRoom]);
   useEffect(() => () => { void disconnect(); }, [disconnect]);
 
   function upsert(line: VoiceLine) {
@@ -57,76 +64,90 @@ export function useTutorSession() {
   }
 
   async function connect(withMic = true) {
-    if (roomRef.current) return;
+    if (roomRef.current || connectingRef.current) return;
     const attempt = ++attemptRef.current;
+    const controller = new AbortController();
+    connectingRef.current = controller;
+    const isCurrent = () => attempt === attemptRef.current && !controller.signal.aborted;
     setStatus("connecting"); setError(null); setLines([]);
     try {
-      const tokenUrl = process.env.NEXT_PUBLIC_TOKEN_URL ?? `${window.location.protocol}//${window.location.hostname}:8000`;
-      const res = await fetch(`${tokenUrl}/token`);
-      if (!res.ok) throw new Error("Voice unavailable");
-      const { token, url } = await res.json() as { token: string; url: string };
-      if (attempt !== attemptRef.current) return;
-      const room = new Room();
-      roomRef.current = room;
-      const active = () => roomRef.current === room && attemptRef.current === attempt;
-      const watchAgent = (p: RemoteParticipant) => {
-        if (!p.isAgent) return;
-        const apply = () => {
-          if (!active()) return;
-          const next = p.attributes["lk.agent.state"];
-          if (next === "listening" || next === "thinking" || next === "speaking") { clearTimeout(joinTimer.current); setStatus(next); }
-        };
-        p.on(ParticipantEvent.AttributesChanged, apply); apply();
-      };
-      room.registerTextStreamHandler("lk.transcription", async (reader, participant) => {
-        const speaker = participant.identity === room.localParticipant.identity ? "You" : "Mimir";
-        if (speaker === "Mimir" && !room.remoteParticipants.get(participant.identity)?.isAgent) return;
-        const id = reader.info.attributes?.["lk.segment_id"] ?? reader.info.id;
-        let text = "";
-        try {
-          for await (const chunk of reader) {
+      await connectWithRetry(async () => {
+        const tokenUrl = process.env.NEXT_PUBLIC_TOKEN_URL ?? `${window.location.protocol}//${window.location.hostname}:8000`;
+        const res = await fetch(`${tokenUrl}/token`, { signal: controller.signal });
+        if (!res.ok) throw new Error("Voice unavailable");
+        const { token, url } = await res.json() as { token: string; url: string };
+        if (!isCurrent()) throw new DOMException("Connection cancelled", "AbortError");
+        const room = new Room();
+        roomRef.current = room;
+        const active = () => roomRef.current === room && isCurrent();
+        let established = false;
+        const watchAgent = (p: RemoteParticipant) => {
+          if (!p.isAgent) return;
+          const apply = () => {
             if (!active()) return;
-            text = (text + chunk).slice(0, 6000);
-            if (text.trim()) upsert({ id, speaker, text });
+            const next = p.attributes["lk.agent.state"];
+            if (next === "listening" || next === "thinking" || next === "speaking") { setStatus(next); }
+          };
+          p.on(ParticipantEvent.AttributesChanged, apply); apply();
+        };
+        room.registerTextStreamHandler("lk.transcription", async (reader, participant) => {
+          const speaker = participant.identity === room.localParticipant.identity ? "You" : "Mimir";
+          if (speaker === "Mimir" && !room.remoteParticipants.get(participant.identity)?.isAgent) return;
+          const id = reader.info.attributes?.["lk.segment_id"] ?? reader.info.id;
+          let text = "";
+          try {
+            for await (const chunk of reader) {
+              if (!active()) return;
+              text = (text + chunk).slice(0, 6000);
+              if (text.trim()) upsert({ id, speaker, text });
+            }
+          } catch { /* A turn can end early when the student interrupts. */ }
+        });
+        room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+          if (!active() || !participant.isAgent || track.kind !== Track.Kind.Audio) return;
+          const el = track.attach();
+          el.muted = pausedRef.current;
+          audioRef.current.push(el); document.body.appendChild(el);
+        });
+        room.on(RoomEvent.TrackUnsubscribed, track => {
+          for (const el of track.detach()) { audioRef.current = audioRef.current.filter(item => item !== el); el.remove(); }
+        });
+        room.on(RoomEvent.AudioPlaybackStatusChanged, () => { if (active()) setAudioBlocked(!room.canPlaybackAudio); });
+        room.on(RoomEvent.ConnectionStateChanged, state => {
+          if (!active()) return;
+          if (state === ConnectionState.Connected) setEverConnected(true);
+          if (state === ConnectionState.Disconnected && established) {
+            void disconnect();
+            setError("Voice connection lost. Tap Mimir to reconnect."); setStatus("error");
           }
-        } catch { /* A turn can end early when the student interrupts. */ }
-      });
-      room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
-        if (!active() || !participant.isAgent || track.kind !== Track.Kind.Audio) return;
-        const el = track.attach();
-        el.muted = pausedRef.current;
-        audioRef.current.push(el); document.body.appendChild(el);
-      });
-      room.on(RoomEvent.TrackUnsubscribed, track => {
-        for (const el of track.detach()) { audioRef.current = audioRef.current.filter(item => item !== el); el.remove(); }
-      });
-      room.on(RoomEvent.AudioPlaybackStatusChanged, () => { if (active()) setAudioBlocked(!room.canPlaybackAudio); });
-      room.on(RoomEvent.ConnectionStateChanged, state => {
-        if (!active()) return;
-        if (state === ConnectionState.Connected) setEverConnected(true);
-        if (state === ConnectionState.Disconnected) { void disconnect(); }
-      });
-      room.on(RoomEvent.ParticipantConnected, watchAgent);
-      await room.connect(url, token);
-      if (!active()) { await room.disconnect(); return; }
-      joinTimer.current = setTimeout(() => {
-        if (!active()) return;
-        void disconnect().then(() => { setError("Tutor didn’t join. Check that the agent is running, then try again."); setStatus("error"); });
-      }, 30000);
-      registerCanvasRpcs(room, tutorCanvas);
-      for (const p of room.remoteParticipants.values()) watchAgent(p);
-      await room.startAudio().catch(() => { if (active()) setAudioBlocked(true); });
-      if (withMic) {
-        try {
-          await room.localParticipant.setMicrophoneEnabled(true, { echoCancellation: true, noiseSuppression: true, autoGainControl: true });
-          if (active()) setMic(true);
-        } catch {
-          if (active()) setError("Microphone unavailable. You can type below or enable it in your browser.");
+        });
+        room.on(RoomEvent.ParticipantConnected, watchAgent);
+        await room.connect(url, token);
+        if (!active()) { await room.disconnect(); throw new DOMException("Connection cancelled", "AbortError"); }
+        registerCanvasRpcs(room, tutorCanvas);
+        for (const p of room.remoteParticipants.values()) watchAgent(p);
+        // Autoplay permission must not hold up joining or microphone capture.
+        void room.startAudio().catch(() => { if (active()) setAudioBlocked(true); });
+        if (withMic) {
+          void room.localParticipant.setMicrophoneEnabled(true, { echoCancellation: true, noiseSuppression: true, autoGainControl: true })
+            .then(() => { if (active()) setMic(true); })
+            .catch(() => { if (active()) setError("Microphone unavailable. You can type below or enable it in your browser."); });
         }
+        await waitForTutor(room, controller.signal);
+        if (!active()) throw new DOMException("Connection cancelled", "AbortError");
+        established = true;
+      }, async () => { if (isCurrent()) await releaseRoom(); }, controller.signal, () => {
+        setStatus("connecting"); setError("Reconnecting to Mimir…"); setMic(false); setAudioBlocked(false);
+      });
+      if (isCurrent()) {
+        connectingRef.current = null;
+        setError(previous => previous === "Reconnecting to Mimir…" ? null : previous);
       }
     } catch {
-      if (attempt !== attemptRef.current) return;
-      await disconnect(); setError("Couldn’t connect. Try again."); setStatus("error");
+      if (!isCurrent()) return;
+      await disconnect();
+      if (attemptRef.current !== attempt + 1) return;
+      setError("Mimir couldn’t finish connecting after two attempts. Tap to try again."); setStatus("error");
     }
   }
 

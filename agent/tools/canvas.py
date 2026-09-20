@@ -56,7 +56,7 @@ class CanvasRpc:
                 image = await future
                 return view, image
         except Exception as error:
-            raise ToolError("Could not see the board. Ask the student to finish their stroke or bring the work into view, then retry.") from error
+            raise ToolError("Could not capture the current board.") from error
         finally:
             self.pending.pop(request_id, None)
             if not future.done():

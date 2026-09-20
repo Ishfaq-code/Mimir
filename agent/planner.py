@@ -5,7 +5,6 @@ import logging
 import re
 from time import perf_counter
 from typing import Literal
-from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 import config
 from math_check import equivalent, valid_scaffold
@@ -24,8 +23,8 @@ class Scaffold(BaseModel):
 class TeachingPlan(BaseModel):
     status: Literal['hint', 'correct', 'incorrect', 'clarify', 'read', 'conversation']
     problem: str
-    student_answer: str | None = None
-    problem_region_ids: list[str]
+    student_answer: str | None = Field(default=None, description='Only an answer actually given by the student in speech, text, or visible work. Use null for an unanswered hint/drawing request. Never copy scaffold.answer or your calculated answer here.')
+    problem_region_ids: list[str] = Field(description='Current IDs for the original question AND its related student work below. Include EVERY highlight_region_id. This is the whole working column, not only the printed question.')
     highlight_region_ids: list[str] = Field(description='ALL regions of the complete subexpression being discussed: both operands AND the operator, never just the operator. Use [] only for no visual target.')
     highlight_label: str
     focus_expression: str | None = Field(default=None, description='Exact canonical numeric subexpression the student is asked to evaluate, e.g. 2+2 or 3*2; null for algebra, ambiguous work or non-calculation questions. Must be a subtree of the original problem.')
@@ -51,6 +50,13 @@ reference (left, right, expression). Otherwise ask which one before giving any m
 Keep the previous active problem only if still visible and not contradicted by new focus or request.
 Never combine work from separate problems. For math turns, problem MUST be the ORIGINAL problem as a canonical plain math expression or
 equation with explicit multiplication (e.g. 2+3*2 or 2*(x+3)=14), not prose or a new example.
+Students usually write their solution BELOW the pasted question. Read that aligned sequence
+from top to bottom; intermediate equations are working for the original question, not automatically
+separate problems. Include that work in problem_region_ids. Do not infer a relationship when the
+content clearly belongs to a different problem. The browser waits for a pause in writing before capture;
+check the latest completed step without demanding that the student finish the entire solution first.
+Tutor annotations are provided separately and may appear in the image. They are scaffolds, not
+student answers. Only the student's actual ink in their blank is evidence that they answered it.
 problem_region_ids must cover the chosen problem and
 its related work, using CURRENT R IDs only. If no identifiable problem, use [] and no scaffold.
 When asking a calculation, highlight the ENTIRE subexpression, including BOTH operands and
@@ -159,8 +165,38 @@ def validate_plan(plan: TeachingPlan, view: dict) -> None:
     if plan.status in ('clarify', 'conversation', 'read') and (plan.scaffold or plan.highlight_region_ids):
         raise ValueError('Ambiguous turn cannot annotate')
 
+def finalize_plan(plan: TeachingPlan, view: dict) -> TeachingPlan:
+    """Shared deterministic checks for both checked OpenAI and native Gemini turns."""
+    if plan.problem.strip().endswith('='):
+        plan.problem = plan.problem.strip()[:-1].strip()
+    proposed_scaffold = plan.scaffold
+    plan.scaffold = None
+    validate_plan(plan, view)
+    if finished_problem(plan):
+        plan.speech = "Yes, that's right. You've finished this problem."
+    else:
+        plan.scaffold = proposed_scaffold
+        validate_plan(plan, view)
+    if plan.scaffold:
+        plan.speech = ("That's right. " if plan.status == 'correct' else "Try this next step. ") + "Write the missing value in the blank below."
+    else:
+        plan.speech = plan.speech.replace('{{blank}}', 'the blank')
+    return plan
+
+
+def speech_without_scaffold(plan: TeachingPlan) -> str:
+    """Drawing failure does not invalidate checked math or mean vision failed."""
+    if not plan.scaffold:
+        return plan.speech
+    if plan.status == 'correct':
+        return "That step checks out. What would you do next?"
+    return "Let's work through this step aloud. What would you do first?"
+
+
 class Planner:
     def __init__(self):
+        # Native Gemini shares the plan schema/checker without loading this client.
+        from openai import AsyncOpenAI
         self.client = AsyncOpenAI(timeout=35, max_retries=0)
 
     async def plan(self, text: str, state: dict, view: dict, image: bytes, history: list[dict], active: dict | None) -> TeachingPlan:
@@ -183,22 +219,7 @@ class Planner:
                     usage.output_tokens if usage else None,
                     usage.output_tokens_details.reasoning_tokens if usage else None)
         if not response.output_parsed: raise ValueError('No readable teaching plan')
-        plan = response.output_parsed
-        # An unfinished arithmetic "=" on the board has no right-hand side yet.
-        if plan.problem.strip().endswith('='):
-            plan.problem=plan.problem.strip()[:-1].strip()
-        # First validate the evidence, then stop on a verified final answer. A model
-        # cannot quietly turn a finished problem into a new exercise.
-        proposed_scaffold = plan.scaffold
-        plan.scaffold = None
-        validate_plan(plan, view)
-        if finished_problem(plan):
-            plan.speech = "Yes, that's right. You've finished this problem."
-        else:
-            plan.scaffold = proposed_scaffold
-            validate_plan(plan, view)
-        plan.speech = plan.speech.replace('{{blank}}', 'the blank')
-        return plan
+        return finalize_plan(response.output_parsed, view)
 
     async def close(self):
         await self.client.close()

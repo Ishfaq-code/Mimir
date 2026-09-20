@@ -20,6 +20,8 @@ interface BoardSource {
   capture(): Promise<BoardCapture>;
   revision(): string;
   isBusy?(): boolean;
+  isSettled?(): boolean;
+  reveal?(bounds: BoundingBox): void;
   hasContent?(): boolean;
   snap(bounds: BoundingBox, label: string): BoundingBox;
 }
@@ -31,7 +33,7 @@ let highlight: BoardHighlight | null = null;
 let hideTimer: ReturnType<typeof setTimeout> | undefined;
 const listeners = new Set<() => void>();
 let focus: BoundingBox | null = null;
-let tutorStatus: "ready" | "checking" = "ready";
+let tutorStatus: "ready" | "waiting" | "checking" = "ready";
 const focusListeners = new Set<() => void>();
 const statusListeners = new Set<() => void>();
 export const getFocus = () => focus;
@@ -39,13 +41,15 @@ export const subscribeFocus = (fn: () => void) => { focusListeners.add(fn); retu
 export function setFocus(next: BoundingBox | null) { focus = next; latest = null; cachedCapture=null; clearHighlight(); focusListeners.forEach(fn => fn()); }
 export const getTutorStatus = () => tutorStatus;
 export const subscribeTutorStatus = (fn: () => void) => { statusListeners.add(fn); return () => { statusListeners.delete(fn); }; };
-export function setTutorStatus(next: "ready" | "checking") { tutorStatus = next; statusListeners.forEach(fn => fn()); }
+export function setTutorStatus(next: "ready" | "waiting" | "checking") { tutorStatus = next; statusListeners.forEach(fn => fn()); }
+const settled = () => !!source && !source.isBusy?.() && (source.isSettled?.() ?? true);
+export function revealBoardBounds(bounds: BoundingBox) { source?.reveal?.(bounds); }
 export function getCurrentView(snapshotId: string) {
-  return source && !source.isBusy?.() && latest && latest.snapshotId === snapshotId && latest.revision === source.revision() ? latest : null;
+  return source && settled() && latest && latest.snapshotId === snapshotId && latest.revision === source.revision() ? latest : null;
 }
 export function getBoardStatus() {
-  const ready=!!source && !getPaused() && !source.isBusy?.();
-  return {ready,revision:ready?source!.revision():null,hasContent:!!source && (source.hasContent?.()??true),preferences:getPreferences()};
+  const ready=!getPaused() && settled();
+  return {ready,available:!!source,revision:ready?source!.revision():null,hasContent:!!source && (source.hasContent?.()??true),preferences:getPreferences()};
 }
 export const subscribeHighlight = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
 export const getHighlight = () => highlight;
@@ -60,13 +64,13 @@ export function registerBoardSource(next: BoardSource) {
   return () => { if (source === next) { source = null; latest = null; cachedCapture=null; clearHighlight(); } };
 }
 export async function captureBoard(): Promise<BoardCapture> {
-  if (!source || getPaused() || source.isBusy?.()) throw new Error("Board unavailable, writing or conversation paused");
+  if (!source || getPaused() || !settled()) throw new Error("Board unavailable, writing or conversation paused");
   if (cachedCapture && latest && cachedCapture.view.revision===source.revision()) return cachedCapture;
   if(pendingCapture) return pendingCapture;
   const currentSource=source;
   pendingCapture=(async()=>{
     const capture=await currentSource.capture();
-    if(source!==currentSource || getPaused() || source.isBusy?.() || capture.view.revision!==source.revision()) throw new Error("Board changed while capturing; look again");
+    if(source!==currentSource || getPaused() || !settled() || capture.view.revision!==source.revision()) throw new Error("Board changed while capturing; look again");
     latest=capture.view;cachedCapture=capture;
     return capture;
   })();

@@ -6,6 +6,8 @@ import type { BoardRegion } from "../tutor/boardView";
 import type { BoardCapture } from "../tutor/boardView";
 import type { BoundingBox } from "../tutor/types";
 import { connectedInk } from "./inkRegions";
+import { getTutorAnnotations } from "../tutor/store";
+import { layoutHandwriting, paintHandwriting } from "../tutor/handwriting";
 
 export function boundsOf(el: CanvasElement): BoundingBox {
   if ("points" in el && el.points.length) {
@@ -46,9 +48,19 @@ export async function captureScene(elements: CanvasElement[], screenshot: Canvas
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Canvas capture unavailable");
   ctx.scale(scale, scale);
-  // Render only student content, including original ink when Typeset math is on.
+  // Include original student ink even when Typeset math is on.
   // No toolbar, caption, selection handles, or content from outside this app.
   renderScene(ctx, width, height, elements, new Set(), camera, dark, new Set(), screenshot);
+  for (const annotation of getTutorAnnotations()) {
+    const drawing = annotation.template && layoutHandwriting(annotation.template);
+    if (!drawing) continue;
+    ctx.save();
+    ctx.translate((annotation.x - camera.x) * camera.zoom, (annotation.y - camera.y) * camera.zoom);
+    ctx.scale(camera.zoom, camera.zoom);
+    ctx.strokeStyle = dark ? "#a7d9bd" : "#28644c";
+    paintHandwriting(ctx, drawing);
+    ctx.restore();
+  }
   const ink = connectedInk(elements);
   const candidates: Omit<BoardRegion, "id">[] = ink.map(region => ({ ...region }));
   for (const el of elements) {
@@ -76,7 +88,7 @@ export async function captureScene(elements: CanvasElement[], screenshot: Canvas
   return { blob, view: {
     snapshotId: crypto.randomUUID(), revision, width: canvas.width, height: canvas.height,
     regions, focus, workspaceWorld,
-    obstacles: [...ink.map(region=>region.bounds), ...elements.filter(el => !el.isDeleted && el.type !== "freedraw").map(boundsOf), ...(screenshot ? [{x:screenshot.x,y:screenshot.y,width:screenshot.width,height:screenshot.height}] : [])].slice(0, 100),
+    obstacles: [...ink.map(region=>region.bounds), ...elements.filter(el => !el.isDeleted && el.type !== "freedraw").map(boundsOf), ...(screenshot ? [{x:screenshot.x,y:screenshot.y,width:screenshot.width,height:screenshot.height}] : [])],
     world: { x: camera.x, y: camera.y, width: width / camera.zoom, height: height / camera.zoom },
     text: [],
   } };

@@ -5,6 +5,7 @@ import math
 import os
 import random
 import uuid
+from collections import OrderedDict
 from typing import Any, Literal
 
 import httpx
@@ -198,11 +199,14 @@ def health_check() -> dict[str, str]:
 
 @app.post("/visualize", response_model=VisualizationResponse)
 async def create_visualization(request: VisualizationRequest) -> VisualizationResponse:
+    cached = cached_visualization(request.problem)
+    if cached is not None:
+        return cached
     if not is_openrouter_visualization_configured():
         raise HTTPException(status_code=503, detail="OpenRouter visualization is not configured on the backend")
     try:
         extraction = await extract_physics(request)
-        return build_visualization(extraction)
+        return remember_visualization(request.problem, build_visualization(extraction))
     except UnsupportedProblem as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except InvalidExtraction:
@@ -240,6 +244,9 @@ def get_token(room: str | None = None) -> dict[str, str]:
         .with_identity(identity)
         .with_name("Student")
         .with_grants(api.VideoGrants(room_join=True, room=room))
+        .with_room_config(api.RoomConfiguration(agents=[api.RoomAgentDispatch(
+            agent_name=os.getenv("LIVEKIT_AGENT_NAME", "mimir-tutor").strip() or "mimir-tutor",
+        )]))
         .to_jwt()
     )
     return {"token": token, "url": url, "room": room, "identity": identity}
@@ -472,6 +479,63 @@ def build_visualization(extraction: PhysicsExtraction) -> VisualizationResponse:
         timeline=VisualizationTimeline(name="t", unit="s", minimum=0, maximum=duration, step=step),
         frames=frames,
     )
+
+
+def normalize_problem(problem: str) -> str:
+    return " ".join(problem.split()).casefold()
+
+
+def premade_visualizations() -> dict[str, VisualizationResponse]:
+    demos: list[tuple[str, dict[str, Any]]] = [
+        (
+            "A truck travels in a straight line at 0 m/s and accelerates uniformly at 3 m/s² for 4 s. Find its final speed and the distance it travels during this time.",
+            {"object_label": "truck", "motion_type": "constant_acceleration_1d", "initial_velocity": 0, "acceleration": 3, "duration": 4},
+        ),
+        (
+            "A truck travels at 12 m/s on a straight road. It brakes uniformly and stops in 4 s. Find its acceleration and stopping distance.",
+            {"object_label": "truck", "motion_type": "constant_acceleration_1d", "initial_velocity": 12, "final_velocity": 0, "duration": 4},
+        ),
+        (
+            "A truck travels in a straight line at a constant speed of 5 m/s for 4 s. How far does it travel?",
+            {"object_label": "truck", "motion_type": "constant_acceleration_1d", "initial_velocity": 5, "acceleration": 0, "duration": 4},
+        ),
+        (
+            "A ball is dropped from rest from a height of 19.6 m. Ignore air resistance and use g = 9.8 m/s². Find the time it takes to reach the ground and its speed just before impact. Take downward as positive.",
+            {"object_label": "ball", "motion_type": "free_fall_1d", "initial_velocity": 0, "acceleration": 9.8, "displacement": 19.6},
+        ),
+    ]
+    return {
+        normalize_problem(problem): build_visualization(PhysicsExtraction.model_validate(knowns))
+        for problem, knowns in demos
+    }
+
+
+PREMADE_VISUALIZATIONS = premade_visualizations()
+VISUALIZATION_CACHE: OrderedDict[str, VisualizationResponse] = OrderedDict()
+VISUALIZATION_CACHE_LIMIT = 32
+
+
+def cached_visualization(problem: str) -> VisualizationResponse | None:
+    key = normalize_problem(problem)
+    premade = PREMADE_VISUALIZATIONS.get(key)
+    if premade is not None:
+        return premade
+    cached = VISUALIZATION_CACHE.get(key)
+    if cached is not None:
+        VISUALIZATION_CACHE.move_to_end(key)
+        return cached
+    return None
+
+
+def remember_visualization(problem: str, visualization: VisualizationResponse) -> VisualizationResponse:
+    key = normalize_problem(problem)
+    if key in PREMADE_VISUALIZATIONS:
+        return visualization
+    VISUALIZATION_CACHE[key] = visualization
+    VISUALIZATION_CACHE.move_to_end(key)
+    while len(VISUALIZATION_CACHE) > VISUALIZATION_CACHE_LIMIT:
+        VISUALIZATION_CACHE.popitem(last=False)
+    return visualization
 
 
 def generate_kinematics_question(kind: KinematicsKind, rng: random.Random | None = None) -> KinematicsQuestion:

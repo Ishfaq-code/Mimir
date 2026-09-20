@@ -77,10 +77,21 @@ export function useScreenshotQuestion() {
     setConfirmedQuestion(null);
   }, []);
 
+  const removeScreenshot = useCallback(() => {
+    requestRef.current?.abort();
+    importVersion.current += 1;
+    setScreenshot(null);
+    setChipOpen(false);
+    setStatus("idle");
+    setTextState("");
+    setError("");
+    setConfirmedQuestion(null);
+  }, []);
+
   const retry = useCallback(() => {
     if (screenshot) { setChipOpen(true); void read(screenshot); }
   }, [read, screenshot]);
 
   return { screenshot, status, text, setText, error, pasteError, setPasteError, progress,
-    chipOpen, dismiss, importScreenshot, retry };
+    chipOpen, dismiss, removeScreenshot, importScreenshot, retry };
 }

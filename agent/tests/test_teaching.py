@@ -68,7 +68,7 @@ class TurnGate(unittest.IsolatedAsyncioTestCase):
     async def test_stop_and_repeat_do_not_wait_for_vision(self):
         tutor=object.__new__(MathTutor)
         tutor._epoch=1;tutor._canvas=MagicMock();tutor._planner=MagicMock();tutor._last_speech='What is three times two?'
-        tutor._canvas.call=AsyncMock(return_value={});tutor._canvas.capture=AsyncMock()
+        tutor._canvas.call=AsyncMock(return_value={'ready':True,'revision':'r1'});tutor._canvas.capture=AsyncMock()
         tutor._planner.plan=AsyncMock();tutor._speak=AsyncMock()
         session=MagicMock();session.userdata.paused=False;session.interrupt=AsyncMock()
         from unittest.mock import patch,PropertyMock
@@ -114,7 +114,7 @@ class TurnGate(unittest.IsolatedAsyncioTestCase):
             capturing.set()
             try: await asyncio.Future()
             finally: cancelled.set()
-        tutor._canvas.call=AsyncMock(return_value={})
+        tutor._canvas.call=AsyncMock(return_value={'ready':True,'revision':'r1'})
         tutor._canvas.capture=capture
         tutor._planner.plan=AsyncMock();tutor._speak=AsyncMock()
         session=MagicMock();session.userdata.paused=False;session.interrupt=AsyncMock()
@@ -131,7 +131,7 @@ class TurnGate(unittest.IsolatedAsyncioTestCase):
     async def test_capture_failure_never_calls_planner(self):
         tutor=object.__new__(MathTutor)
         tutor._epoch=1;tutor._canvas=MagicMock();tutor._planner=MagicMock();tutor._history=[];tutor._active=None
-        tutor._canvas.call=AsyncMock(return_value={})
+        tutor._canvas.call=AsyncMock(return_value={'ready':True,'revision':'r1'})
         tutor._canvas.capture=AsyncMock(side_effect=RuntimeError('capture failed'))
         tutor._planner.plan=AsyncMock();tutor._speak=AsyncMock()
         session=MagicMock();session.userdata.paused=False;session.interrupt=AsyncMock()
@@ -140,19 +140,19 @@ class TurnGate(unittest.IsolatedAsyncioTestCase):
             await tutor._respond('check my work',1)
         tutor._planner.plan.assert_not_awaited()
         self.assertIn("reliable check",tutor._speak.call_args.args[0])
-    async def test_stale_board_never_speaks_plan(self):
+    async def test_annotation_failure_does_not_discard_verified_math(self):
         tutor=object.__new__(MathTutor)
         tutor._epoch=1;tutor._canvas=MagicMock();tutor._planner=MagicMock();tutor._history=[];tutor._active=None
-        async def rpc(name,args):return {'success':False} if name=='apply_teaching_plan' else {}
+        async def rpc(name,args):return {'success':False,'error':'invalid_scaffold'} if name=='apply_teaching_plan' else {'ready':True,'revision':'r1'}
         tutor._canvas.call=AsyncMock(side_effect=rpc)
-        tutor._canvas.capture=AsyncMock(return_value=({'snapshotId':'v1'},b'image'))
-        p=TeachingPlan(status='hint',problem='x',problem_region_ids=['R1'],highlight_region_ids=[],highlight_label='',speech='OLD MATH',checks=[],scaffold=None)
+        tutor._canvas.capture=AsyncMock(return_value=({'snapshotId':'v1','revision':'r1'},b'image'))
+        p=TeachingPlan(status='hint',problem='x',problem_region_ids=['R1'],highlight_region_ids=[],highlight_label='',speech='Which operation would you try first?',checks=[],scaffold=None)
         tutor._planner.plan=AsyncMock(return_value=p);tutor._speak=AsyncMock()
         session=MagicMock();session.userdata.paused=False
         interrupted=asyncio.get_running_loop().create_future();interrupted.set_result(None)
         session.interrupt=MagicMock(return_value=interrupted)
         from unittest.mock import patch,PropertyMock
         with patch.object(MathTutor,'session',new_callable=PropertyMock,return_value=session):await tutor._respond('hint',1)
-        self.assertNotIn('OLD MATH',tutor._speak.call_args.args[0])
+        tutor._speak.assert_awaited_once_with('Which operation would you try first?')
 
 if __name__=='__main__':unittest.main()
