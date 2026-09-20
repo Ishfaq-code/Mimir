@@ -46,8 +46,12 @@ try {
   assert.ok(poweredSine.some((point) => point && Math.abs(point[1] - 1) < 0.02), "sin^2 should evaluate numerically");
   const ln = graph.computeCurve(graph.latexToExpr("y=lnx"), {}, 0.5, 2, 100);
   assert.ok(ln.every((point) => point === null || Number.isFinite(point[1])), "lnx should evaluate numerically");
+  const combinedExpressions = ["y=x^2-3", "y=sinx"].map(graph.latexToExpr);
+  const combinedCurves = combinedExpressions.map((expression) => graph.computeCurve(expression, {}, -3, 3, 100));
+  assert.equal(combinedCurves.length, 2, "multiple equations should produce multiple curves");
+  assert.ok(combinedCurves.every((curve) => curve.some(Boolean)), "each selected equation should have drawable samples");
 
-  console.log(`Passed: ${cases.length} expression forms, coefficient extraction, domains, and asymptote gaps.`);
+  console.log(`Passed: ${cases.length} expression forms, multi-curve sampling, coefficient extraction, domains, and asymptote gaps.`);
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }

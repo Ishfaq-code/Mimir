@@ -17,12 +17,12 @@ import Icon from "./Icon";
 
 export interface GraphInstance {
   id: string;
-  latex: string;
+  equations: { id: string; latex: string }[];
   x: number;
   y: number;
   w: number;
   h: number;
-  sourceOverlayId: string;
+  sourceOverlayIds: string[];
 }
 
 interface GraphOverlayProps {
@@ -52,6 +52,12 @@ const DEFAULT_VIEWPORT: MathViewport = {
 
 const TRACE_DURATION = 1500;
 const CURVE_STEPS = 300;
+const CURVE_COLORS = ["#0d9488", "#7c3aed", "#ea580c", "#2563eb", "#db2777", "#65a30d"];
+
+interface GraphCurve {
+  points: ([number, number] | null)[];
+  color: string;
+}
 
 function easeOutCubic(t: number) {
   return 1 - Math.pow(1 - t, 3);
@@ -76,7 +82,7 @@ function drawGraph(
   w: number,
   h: number,
   vp: MathViewport,
-  points: ([number, number] | null)[],
+  curves: GraphCurve[],
   progress: number,
   dark: boolean,
 ) {
@@ -160,39 +166,37 @@ function drawGraph(
     ctx.fillText(label, labelX, toScreenY(y));
   }
 
-  // Curve
-  const curveColor = dark ? "#5eead4" : "#0d9488";
-  ctx.strokeStyle = curveColor;
+  // Curves
   ctx.lineWidth = 2.5;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
-
-  // Determine how many points to draw based on animation progress
-  const drawCount = Math.ceil(points.length * progress);
-
-  ctx.beginPath();
-  let drawing = false;
-  for (let i = 0; i < drawCount; i++) {
-    const p = points[i];
-    if (!p) {
-      drawing = false;
-      continue;
+  for (const curve of curves) {
+    ctx.strokeStyle = dark && curve.color === "#0d9488" ? "#5eead4" : curve.color;
+    const drawCount = Math.ceil(curve.points.length * progress);
+    ctx.beginPath();
+    let drawing = false;
+    for (let i = 0; i < drawCount; i++) {
+      const p = curve.points[i];
+      if (!p) {
+        drawing = false;
+        continue;
+      }
+      const sx = toScreenX(p[0]);
+      const sy = toScreenY(p[1]);
+      // Clip to visible area (with some margin)
+      if (sy < -100 || sy > h + 100) {
+        drawing = false;
+        continue;
+      }
+      if (!drawing) {
+        ctx.moveTo(sx, sy);
+        drawing = true;
+      } else {
+        ctx.lineTo(sx, sy);
+      }
     }
-    const sx = toScreenX(p[0]);
-    const sy = toScreenY(p[1]);
-    // Clip to visible area (with some margin)
-    if (sy < -100 || sy > h + 100) {
-      drawing = false;
-      continue;
-    }
-    if (!drawing) {
-      ctx.moveTo(sx, sy);
-      drawing = true;
-    } else {
-      ctx.lineTo(sx, sy);
-    }
+    ctx.stroke();
   }
-  ctx.stroke();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -210,12 +214,17 @@ export default function GraphOverlay({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [viewport, setViewport] = useState<MathViewport>(() => {
     try {
-      const expression = latexToExpr(graph.latex);
-      const variables = Object.fromEntries(extractVariables(expression).map(name => [name, 1]));
-       const initialPoints = computeCurve(expression, variables, DEFAULT_VIEWPORT.xMin, DEFAULT_VIEWPORT.xMax, CURVE_STEPS);
-       const values = initialPoints
-         .filter((point): point is [number, number] => point !== null && Math.abs(point[1]) < 10000)
-         .map(point => point[1]);
+      const expressions = graph.equations.map((equation) => latexToExpr(equation.latex));
+      const variables = Object.fromEntries(
+        [...new Set(expressions.flatMap((expression) => extractVariables(expression)))].map((name) => [name, 1]),
+      );
+      const values = expressions.flatMap((expression) => computeCurve(
+        expression,
+        variables,
+        DEFAULT_VIEWPORT.xMin,
+        DEFAULT_VIEWPORT.xMax,
+        CURVE_STEPS,
+      )).filter((point): point is [number, number] => point !== null && Math.abs(point[1]) < 10000).map(point => point[1]);
       if (!values.length) return DEFAULT_VIEWPORT;
       const min = Math.min(...values), max = Math.max(...values);
       const padding = Math.max(1, (max - min) * 0.15);
@@ -228,17 +237,16 @@ export default function GraphOverlay({
   const progressRef = useRef(0);
   const animIdRef = useRef<number | undefined>(undefined);
 
-  // Parse expression and extract slider variables once
-  const parsed = useMemo(() => {
+  const parsed = useMemo(() => graph.equations.map((equation) => {
     try {
-      const e = latexToExpr(graph.latex);
-      return { expr: e, error: false };
+      return { ...equation, expr: latexToExpr(equation.latex), error: false };
     } catch {
-      return { expr: "", error: true };
+      return { ...equation, expr: "", error: true };
     }
-  }, [graph.latex]);
-  const expr = parsed.expr;
-  const sliderVars = useMemo(() => (parsed.error ? [] : extractVariables(expr)), [expr, parsed.error]);
+  }), [graph.equations]);
+  const sliderVars = useMemo(() => [...new Set(parsed.flatMap((equation) =>
+    equation.error ? [] : extractVariables(equation.expr),
+  ))].sort(), [parsed]);
   const [sliderValues, setSliderValues] = useState<Record<string, number>>(
     () => Object.fromEntries(sliderVars.map((v) => [v, 1])),
   );
@@ -258,22 +266,25 @@ export default function GraphOverlay({
   const canvasH = Math.max(40, height - headerHeight - sliderBarHeight);
 
   // Compute curve points
-  const points = useMemo(() => {
-    if (parsed.error || !expr) return [];
+  const curves = useMemo<GraphCurve[]>(() => parsed.map((equation, index) => {
+    if (equation.error || !equation.expr) return { points: [], color: CURVE_COLORS[index % CURVE_COLORS.length] };
     try {
-      return computeCurve(expr, effectiveSliderValues, viewport.xMin, viewport.xMax, CURVE_STEPS, {
-        yMin: viewport.yMin,
-        yMax: viewport.yMax,
-      });
+      return {
+        points: computeCurve(equation.expr, effectiveSliderValues, viewport.xMin, viewport.xMax, CURVE_STEPS, {
+          yMin: viewport.yMin,
+          yMax: viewport.yMax,
+        }),
+        color: CURVE_COLORS[index % CURVE_COLORS.length],
+      };
     } catch {
-      return [];
+      return { points: [], color: CURVE_COLORS[index % CURVE_COLORS.length] };
     }
-  }, [expr, parsed.error, effectiveSliderValues, viewport.xMin, viewport.xMax, viewport.yMin, viewport.yMax]);
+  }), [parsed, effectiveSliderValues, viewport.xMin, viewport.xMax, viewport.yMin, viewport.yMax]);
 
   // Store latest draw inputs in refs so the animation loop and redraw
   // always read current values without restarting the animation.
-  const drawStateRef = useRef({ viewport, points, dark });
-  useEffect(() => { drawStateRef.current = { viewport, points, dark }; }, [viewport, points, dark]);
+  const drawStateRef = useRef({ viewport, curves, dark });
+  useEffect(() => { drawStateRef.current = { viewport, curves, dark }; }, [viewport, curves, dark]);
 
   const redraw = useCallback(() => {
     const cvs = canvasRef.current;
@@ -287,7 +298,7 @@ export default function GraphOverlay({
     const ctx = cvs.getContext("2d")!;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const st = drawStateRef.current;
-    drawGraph(ctx, w, h, st.viewport, st.points, progressRef.current, st.dark);
+     drawGraph(ctx, w, h, st.viewport, st.curves, progressRef.current, st.dark);
   }, []);
 
   // Trace-in animation — runs once on mount, never restarts
@@ -314,7 +325,7 @@ export default function GraphOverlay({
   // Redraw when data changes (viewport, points, dark, size) without restarting animation
   useEffect(() => {
     if (progressRef.current >= 1) redraw();
-  }, [viewport, points, dark, width, height, redraw]);
+  }, [viewport, curves, dark, width, height, redraw]);
 
   // Scroll to zoom, Shift+scroll to pan — native listener so preventDefault works
   const containerRef = useRef<HTMLDivElement>(null);
@@ -409,7 +420,17 @@ export default function GraphOverlay({
       style={{ left, top, width, height }}
     >
       <div className="graph-overlay-header" onPointerDown={handleDragStart}>
-        <span className="graph-overlay-title">Graph</span>
+        <div className="graph-overlay-heading">
+          <span className="graph-overlay-title">{graph.equations.length === 1 ? "Graph" : `${graph.equations.length} graphs`}</span>
+          <div className="graph-overlay-legend" aria-label="Graphed equations">
+            {graph.equations.map((equation, index) => (
+              <span key={equation.id} className="graph-overlay-legend-item">
+                <span className="graph-overlay-legend-dot" style={{ backgroundColor: CURVE_COLORS[index % CURVE_COLORS.length] }} />
+                <span>{equation.latex}</span>
+              </span>
+            ))}
+          </div>
+        </div>
         <button
           className="icon-button"
           onClick={onClose}

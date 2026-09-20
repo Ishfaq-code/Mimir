@@ -278,19 +278,20 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
     setSelectedLatexIds(ids);
   }, []);
 
-  const getSelectedLatexOverlay = useCallback((): LatexOverlay | null => {
-    if (selectedRef.current.size === 0) return null;
-    return Object.values(latexOverlaysRef.current).find(
+  const getSelectedLatexOverlays = useCallback((): LatexOverlay[] => {
+    if (selectedRef.current.size === 0) return [];
+    return Object.values(latexOverlaysRef.current).filter(
       (o) => o.strokeIds.some((id) => selectedRef.current.has(id)),
-    ) ?? null;
+    );
   }, []);
 
   const createGraph = useCallback(() => {
-    const overlay = getSelectedLatexOverlay();
-    if (!overlay) return;
-    if (graphs.some((g) => g.sourceOverlayId === overlay.id)) return;
+    const overlays = getSelectedLatexOverlays();
+    if (!overlays.length) return;
+    const sourceOverlayIds = overlays.map((overlay) => overlay.id);
+    if (graphs.some((g) => g.sourceOverlayIds.length === sourceOverlayIds.length && g.sourceOverlayIds.every((id) => sourceOverlayIds.includes(id)))) return;
     try {
-      validateExpression(latexToExpr(overlay.latex));
+      overlays.forEach((overlay) => validateExpression(latexToExpr(overlay.latex)));
       const cam = cameraRef.current;
       const cvs = canvasRef.current;
       const viewW = (cvs?.clientWidth ?? 800) / cam.zoom;
@@ -298,31 +299,37 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
       const gw = Math.min(500, viewW * 0.45);
       const gh = Math.min(400, viewH * 0.55);
       // Place to the right of the equation, vertically centered with it
-      let gx = overlay.bounds.x + overlay.bounds.w + 40;
-      let gy = overlay.bounds.y + overlay.bounds.h / 2 - gh / 2;
+      const bounds = overlays.reduce((combined, overlay) => ({
+        x: Math.min(combined.x, overlay.bounds.x),
+        y: Math.min(combined.y, overlay.bounds.y),
+        w: Math.max(combined.x + combined.w, overlay.bounds.x + overlay.bounds.w) - Math.min(combined.x, overlay.bounds.x),
+        h: Math.max(combined.y + combined.h, overlay.bounds.y + overlay.bounds.h) - Math.min(combined.y, overlay.bounds.y),
+      }), { ...overlays[0].bounds });
+      let gx = bounds.x + bounds.w + 40;
+      let gy = bounds.y + bounds.h / 2 - gh / 2;
       // If it would go off the right edge of the viewport, place below instead
       const viewRight = cam.x + viewW;
       if (gx + gw > viewRight - 20) {
-        gx = overlay.bounds.x;
-        gy = overlay.bounds.y + overlay.bounds.h + 30;
+         gx = bounds.x;
+         gy = bounds.y + bounds.h + 30;
       }
       // Clamp to stay within visible area
       gx = Math.max(cam.x + 20, Math.min(gx, cam.x + viewW - gw - 20));
       gy = Math.max(cam.y + 20, Math.min(gy, cam.y + viewH - gh - 20));
       const graph: GraphInstance = {
         id: `graph_${Date.now().toString(36)}`,
-        latex: overlay.latex,
+        equations: overlays.map((overlay) => ({ id: overlay.id, latex: overlay.latex })),
         x: gx,
         y: gy,
         w: gw,
         h: gh,
-        sourceOverlayId: overlay.id,
+        sourceOverlayIds,
       };
       setGraphs((prev) => [...prev, graph]);
     } catch {
       // Expression couldn't be parsed — silently ignore
     }
-  }, [getSelectedLatexOverlay, graphs]);
+  }, [getSelectedLatexOverlays, graphs]);
 
   const closeGraph = useCallback((graphId: string) => {
     setGraphs((prev) => prev.filter((g) => g.id !== graphId));
@@ -1387,8 +1394,8 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
       <TutorOverlay camera={overlayCamera} />
       <ProblemFocus camera={overlayCamera} />
 
-      {graphs.map((graph) => (
-        <GraphOverlay key={`${graph.id}:${graph.latex}`} graph={graph} camera={overlayCamera} dark={dark} onClose={() => closeGraph(graph.id)} onMove={moveGraph} onResize={resizeGraph} />
+       {graphs.map((graph) => (
+        <GraphOverlay key={`${graph.id}:${graph.equations.map((equation) => equation.id).join(",")}`} graph={graph} camera={overlayCamera} dark={dark} onClose={() => closeGraph(graph.id)} onMove={moveGraph} onResize={resizeGraph} />
       ))}
 
       <div className="canvas-topline">
