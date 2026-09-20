@@ -18,7 +18,7 @@ Repository: `Ishfaq-code/Mimir`. Local root: `/Users/stevin/Documents/Projects/M
 | Review | Editable plain text, empty confirmation disabled, retry/manual fallback, cancellation and stale-result guards. Normal text paste remains available inside the correction field. |
 | Voice context | `CanvasState.question` holds only confirmed text, separate from recognized student equations. Editing/replacing clears it and unmounts/disconnects voice. Closing the sidebar preserves voice. |
 | Canvas selection | Select (V/1) supports click/Shift-click, marquee selection, multi-element movement, and corner resizing. Pasted screenshots can also be selected, moved, and resized. |
-| Textboxes | Select Text (T), tap to place or edit. Done/Enter saves, Shift+Enter adds a line, Escape/Cancel discards. Uses ink color; undo/redo and eraser apply. Text remains visual canvas content, separate from question confirmation and stroke recognition. |
+| Textboxes | Select Text (T), tap to place or edit. Done/Enter saves, Shift+Enter adds a line, Escape/Cancel discards. Uses ink color; undo/redo and eraser apply. Text remains visual canvas content, separate from question confirmation and stroke recognition. Selecting a textbox and choosing Visualize immediately requests a Physics word-problem visualization. |
 | Handwriting | Existing custom Canvas 2D engine. Pen stays selected; no stroke selection handles. Eight colors including white, widths 1/2/4, undo/redo. |
 | Navigation | Wheel pan, modifier-wheel zoom, Space/middle-button drag, finger pan, zoom controls. |
 | MyScript | Optional Typeset math switch recognizes freehand strokes via backend `/ws/latex`. Separate from screenshot OCR. |
@@ -27,7 +27,8 @@ Repository: `Ishfaq-code/Mimir`. Local root: `/Users/stevin/Documents/Projects/M
 | Tutor annotations | Configured LiveKit/OpenAI agent can read canvas context and write LaTeX through RPC. |
 | Error states | Recognition failures preserve ink and expose retry. Voice failures show a recoverable error. |
 | Persistence | In-memory visit only. Reload clears image, reviewed question, and ink. |
-| Absent | Accounts, teacher reports, durable storage, other import methods, generated visualizations, precise highlighting, animated demonstrations, reliable proactive error detection. |
+| Visualization | Selected textbox or confirmed question text is sent with `kinematics` topic to `POST /visualize` (legacy `physics` still accepted). OpenRouter extracts inputs for a single object moving in one direction with constant acceleration. Visualize requires a selected textbox or selected confirmed screenshot; no selection shows paste/select guidance. Plain-text native paste creates a wrapped, undoable textbox. Every submitted problem calls OpenRouter, including demo paragraphs. `backend/kinematics_prompt.py` supplies interpretation rules and examples; extracted object labels and quantities drive validated rendering. `GET /visualize/question?kind=speed_up\|braking\|constant_speed\|free_fall` returns question text and nine matching frames without a provider call. Timeline and variable controls render the result. |
+| Absent | Accounts, teacher reports, durable storage, other import methods, generated visualizations beyond the Physics keyframe flow, precise highlighting, animated demonstrations, reliable proactive error detection. |
 
 ## Ownership and data flow
 
@@ -53,7 +54,8 @@ flowchart TD
 | `frontend/lib/useScreenshotQuestion.ts` | Screenshot lifecycle, asynchronous import versions, abortable OCR, editable text, confirmation and tutor context. |
 | `frontend/lib/screenshot.ts` | File validation/decode, Tesseract lazy import, OCR progress/timeout/cancellation, worker cleanup. |
 | `frontend/scripts/prepare-ocr.mjs` | Copies installed worker, core variants, language data, and licenses to ignored `public/ocr/` before dev/build. |
-| `frontend/components/InfiniteCanvas.tsx` | Existing stroke capture/history/recognition, camera, reference image placement, canvas tools. |
+| `frontend/components/InfiniteCanvas.tsx` | Existing stroke capture/history/recognition, camera, reference image placement, canvas tools, and selected-text visualization requests. |
+| `frontend/components/VisualizationResult.tsx` | Safe SVG renderer for validated visualization keyframes, timeline slider, and Previous/Next controls. |
 | `frontend/lib/canvas/renderer.ts` | World-space image followed by ink painting. Existing smoothing is unchanged. |
 | `frontend/components/IslandToolbar.tsx` | Pen/Eraser/Text, colors/width, undo/redo. |
 | `frontend/components/CanvasTextEditor.tsx` | Positioned textbox editor, multiline input, outside-click save, cancellation and focus handling. |
@@ -61,7 +63,7 @@ flowchart TD
 | `frontend/lib/tutor/store.ts`, `types.ts` | Separate confirmed question, recognized equations, tutor annotations, revisions/subscriptions. |
 | `frontend/components/TutorOverlay.tsx` | KaTeX annotations aligned with camera. |
 | `frontend/app/globals.css` | Warm neutral / green tokens, dark theme, controls, review panel, responsive and reduced-motion rules. |
-| `backend/main.py` | Health, token minting, MyScript WebSocket recognition and CORS. |
+| `backend/main.py` | Health, token minting, MyScript WebSocket recognition, OpenRouter visualization generation, and CORS. |
 | `agent/prompts.py` | Tutor reads confirmed question as problem data, distinct from student work and role instructions. |
 
 `components/Canvas.tsx`, `LatexPreview.tsx`, and `lib/recognizer.ts` are disconnected scaffolding. There is no Excalidraw SDK. `ChatPanel.tsx` and `lib/problems.ts` were removed with the preset flow. `spec.md` includes planned agent tools that do not all exist yet.
@@ -89,7 +91,7 @@ See [README.md](../README.md). Next.js 16.3.5 / React 19 / TypeScript, Tesseract
 
 Screenshot OCR works without provider keys. Its lazy-loaded assets come from `/ocr/` on this app, generated before build/dev and excluded from Git, lint, and Docker input context. Docker's builder regenerates them and its runner serves them from public.
 
-`backend/.env` is an ignored comment-only local file, sufficient to start Compose. Configure MyScript/LiveKit there and OpenAI/LiveKit in `agent/.env`; the agent runs separately. No provider credentials were supplied during these changes. Defaults use the browser hostname on backend port 8000. Backend CORS currently allows only `http://localhost:3000`; configure origins deliberately for a tunnel/deployment. iPad Clipboard API and microphone access need a secure supported origin; localhost on desktop does not verify iPad HTTPS readiness.
+`backend/.env` is ignored. Configure MyScript, LiveKit, and the OpenRouter visualization key there; configure OpenAI/LiveKit separately in `agent/.env` for voice. The agent runs separately. Defaults use the browser hostname on backend port 8000. Backend CORS currently allows only `http://localhost:3000`; configure origins deliberately for a tunnel/deployment. iPad Clipboard API and microphone access need a secure supported origin; localhost on desktop does not verify iPad HTTPS readiness.
 
 ## Verification
 
@@ -97,10 +99,42 @@ Frontend overrides: `NEXT_PUBLIC_TOKEN_URL`, `NEXT_PUBLIC_RECOGNIZER_WS_URL`, an
 
 The frontend revamp covered pen/eraser, history, colors, themes, recognition/voice failure states, responsive layouts, screenshot OCR review, and the Text tool. Browser checks exercised a clipboard PNG (`Solve for x. 2(x + 3) = 14`), correction/confirmation, empty submission blocking, cancellation, repeat paste, blank-image fallback, ink preservation, and multiline text editing. A store contract check verified only confirmed text becomes question context and clearing it removes stale work/annotations.
 
-ESLint, TypeScript, and the Docker production build passed. Production OCR was also verified through the Paste screenshot button against real PNG clipboard data, with no browser runtime errors. Screenshot import passed desktop browser checks. The browser viewport override did not change the measured viewport during this run, so mobile layout and physical iPad clipboard/Pencil behavior still need a device check. Do not claim a hardware pass. No real LiveKit/OpenAI/MyScript provider roundtrip was completed.
+ESLint, TypeScript, and the Docker production build passed. Production OCR was also verified through the Paste screenshot button against real PNG clipboard data, with no browser runtime errors. Screenshot import passed desktop browser checks. The browser viewport override did not change the measured viewport during this run, so mobile layout and physical iPad clipboard/Pencil behavior still need a device check. Do not claim a hardware pass. No real LiveKit/OpenAI/MyScript/OpenRouter provider roundtrip was completed.
 
 The Text tool was checked by creating multiline text, reopening it, saving corrections, canceling, undoing/redoing edits, clicking outside to create another box, switching to Pen, and erasing a textbox. Lint, TypeScript, and the production build passed. Physical iPad keyboard behavior remains unverified.
+
+### Kinematics implementation, 2026-09-20
+
+Generated practice uses randomized numeric templates and the same deterministic solver as custom problems. Questions cover speeding up, braking to rest, constant speed, and downward free fall with explicit gravity. Text and frames are returned together, so generation does not depend on extraction accuracy. The solver now handles initial/final speed plus duration and constant speed plus distance, rejects inconsistent or unreachable states, and rejects direction reversal. Horizontal motion has correctly directed velocity/acceleration arrows; downward free fall uses a ball. Multiple moving bodies, collision/optimization constraints, and unknown initial speed remain unsupported, with a scope-specific recovery message and generated questions available in the dialog. Generated practice stays separate from voice/screenshot context.
+
+The existing `visualize-tool` checkout was merged with `origin/main` to retain the collaborator's graph tool. Merge verification passed TypeScript; full ESLint reports four pre-existing errors in the incoming `GraphOverlay.tsx` (state updates in effects and ref writes during render).
+
+Verification: seven backend regression tests passed, including 200 seeded question/animation pairs, the initial/final-speed solver regression, invalid motion rejection, the original two-ball rejection, and all generated endpoints with provider configuration disabled. TypeScript, ESLint on changed frontend components, and an isolated Docker production build passed. Disposable Chromium exercised all four question types through their final frames, mobile width 390 px, light/dark themes, focus restoration, and request cancellation, with no page runtime errors. Physical iPad/Pencil behavior was not tested. Generated practice made no provider calls; the revised custom-extraction prompt was not revalidated with a live model during this implementation.
 
 ## Next work
 
 Validate native screenshot paste and review on the actual iPad; configure and exercise live tutoring. Consider math-specialized OCR for notation beyond simple printed algebra. Later inputs should feed the existing import/review/confirm boundary. Preserve cancellation, confirmation gating, and normal text editing. Add region-based handwriting context, precise annotations, generated visualizations, and persistence after the core demo works.
+
+### Paste-to-visualize update, 2026-09-20
+
+The current UI supersedes the generated-question selector described above. Paste plain text, select its textbox, and click Visualize. The modal never silently substitutes generated practice. Four copyable demo questions use whitespace-normalized exact matching before provider extraction; edits to their content use normal extraction. Screenshot confirmation and voice context remain separate.
+
+Verification for this update: TypeScript and targeted frontend ESLint passed; all eight backend regression tests passed. Disposable Chromium exercised all four pasted demo paragraphs through selection and modal rendering, empty-selection guidance, Escape, and a 390 px dark layout with no runtime errors. Physical iPad/Pencil and live custom-provider extraction were not tested. The existing graph lint failures remain outside this change.
+
+### API-driven interpretation, 2026-09-20
+
+This supersedes the exact demo matching above: `POST /visualize` always calls the configured OpenRouter model. `backend/kinematics_prompt.py` separates system rules, example exchanges, and the incoming problem. The model supplies the object label and known quantities, or an actionable unsupported reason. The backend converts units, rejects inconsistent/unsupported motion, and calculates nine frames. No model-generated code or SVG is executed. Requests use one call, a 45-second timeout, and an 800-token output cap. The existing `GET /visualize/question` remains a legacy randomized practice endpoint, unused by the current UI; it is not a fallback for pasted problems. Provider configuration is required even for demo paragraphs.
+
+Verification: all ten backend tests passed, including HTTP-boundary extraction, mandatory provider use for demo text, malformed provider responses, unsupported reasons, and existing physics regressions. Live OpenRouter returned correct final values for a train using km/h and minutes and four novel browser problems (scooter acceleration, cyclist braking, constant-speed train, falling stone). Disposable Chromium verified paste/select/modal, empty-selection guidance, Escape, and a 390 px dark layout with no runtime errors. Physical iPad/Pencil remains untested. No frontend source changed in this update.
+
+### Visualization playback, 2026-09-20
+
+Results autoplay over eight seconds using requestAnimationFrame and linear interpolation between the nine validated keyframes. The displayed timeline retains simulated time. Backward/Forward step to adjacent keyframes; stepping and scrubbing pause, and Play from the end restarts. Closing/unmounting cancels animation. The visible Kinematics heading and scope paragraph are removed; the dialog retains an accessible name.
+
+Playback verification: TypeScript and targeted ESLint passed. Disposable Chromium with a local backend-generated fixture verified autoplay progress, pause stability, forward/backward stepping, seeking, stopping at the final frame, replay, controls above the timeline, heading removal, and a 390 px dark layout with no runtime errors. No provider calls were needed for playback checks. Physical iPad/Pencil remains untested.
+
+### Visualization playback redesign, 2026-09-20
+
+The component-only redesign gives the modal a compact full-question header and Close action, an unboxed readout labeled Time, Distance, Speed, and Acceleration, a tighter horizontal animation viewport, and a separate viewport for free fall. Grouped SVG transport controls sit above the slider; elapsed/total simulated time replaces percentage progress. Long questions remain scrollable, and the existing colors, Geist typography, light/dark themes, playback behavior, and request lifecycle are preserved. No global design tokens or sidecar were regenerated.
+
+Verification: TypeScript and targeted frontend ESLint passed. Disposable browser playback checks passed, and the rendered modal was inspected at 1100 × 900 in light mode and 390 × 844 in dark mode. These desktop browser checks do not verify physical iPad, Apple Pencil, or iPad Safari behavior; those were not tested. Existing unrelated full-lint failures remain outside this change.
