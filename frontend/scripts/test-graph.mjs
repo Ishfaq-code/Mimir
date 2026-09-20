@@ -19,6 +19,12 @@ try {
     ["y = A\\sin(Bx+C)+D", "A*sin(B*x+C)+D", ["A", "B", "C", "D"]],
     ["y = \\frac{x+1}{x-2}", "((x+1)/(x-2))", []],
     ["y = \\log(x)", "log(x)", []],
+    ["y = lnx", "ln(x)", []],
+    ["y = \\ln x", "ln(x)", []],
+    ["y = sin^2x", "(sin(x))^(2)", []],
+    ["y = sin^2(x)", "(sin(x))^(2)", []],
+    ["y = sin^{2}x", "(sin(x))^(2)", []],
+    ["y = A sin^2(Bx)", "A*(sin(B*x))^(2)", ["A", "B"]],
     ["y = \\sqrt{x}", "sqrt(x)", []],
     ["y = |x-1|", "abs(x-1)", []],
   ];
@@ -36,6 +42,10 @@ try {
   assert.ok(logarithm.some((point) => point === null), "logarithm domain should contain gaps");
   const sine = graph.computeCurve(graph.latexToExpr("y=sin(x)"), {}, -Math.PI, Math.PI, 100);
   assert.ok(sine.some((point) => point && Math.abs(point[1]) < 0.01), "sine should evaluate numerically");
+  const poweredSine = graph.computeCurve(graph.latexToExpr("y=sin^2x"), {}, -Math.PI, Math.PI, 100);
+  assert.ok(poweredSine.some((point) => point && Math.abs(point[1] - 1) < 0.02), "sin^2 should evaluate numerically");
+  const ln = graph.computeCurve(graph.latexToExpr("y=lnx"), {}, 0.5, 2, 100);
+  assert.ok(ln.every((point) => point === null || Number.isFinite(point[1])), "lnx should evaluate numerically");
 
   console.log(`Passed: ${cases.length} expression forms, coefficient extraction, domains, and asymptote gaps.`);
 } finally {

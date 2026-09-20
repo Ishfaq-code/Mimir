@@ -8,6 +8,7 @@ const FUNCTIONS = new Set([
 ]);
 const CONSTANTS = new Set(["e", "pi"]);
 const LATEX_FUNCTIONS = [...FUNCTIONS].sort((a, b) => b.length - a.length);
+const UNARY_FUNCTIONS = LATEX_FUNCTIONS.filter((name) => name !== "max" && name !== "min");
 
 function readGroup(source: string, start: number, open = "{", close = "}"): [string, number] | null {
   if (source[start] !== open) return null;
@@ -111,6 +112,31 @@ function convertFunctionCommands(source: string): string {
   return result.replace(/\\pi\b/g, "pi");
 }
 
+function normalizeShorthandFunctions(source: string): string {
+  const names = UNARY_FUNCTIONS.join("|");
+  let result = source;
+
+  // Normalize sin^2x, sin^2(x), and sin^{2}x before generic superscript handling.
+  result = result.replace(
+    new RegExp(
+      `\\b(${names})\\s*\\^\\s*(?:\\{([^{}]+)\\}|([A-Za-z]|\\d+(?:\\.\\d*)?))\\s*(\\([^()]*\\)|[A-Za-z0-9.]+)`,
+      "g",
+    ),
+    (_, name: string, bracedExponent: string | undefined, plainExponent: string | undefined, argument: string) => {
+      const exponent = bracedExponent ?? plainExponent;
+      const value = argument.startsWith("(") ? argument.slice(1, -1) : argument;
+      return `(${name}(${value}))^(${exponent})`;
+    },
+  );
+
+  // Normalize calculator-style forms such as lnx, sinx, and sinhx.
+  result = result.replace(
+    new RegExp(`\\b(${names})(?!\\s*\\()\\s*([A-Za-z0-9.]+)`, "g"),
+    (_, name: string, argument: string) => `${name}(${argument})`,
+  );
+  return result;
+}
+
 function convertSuperscripts(source: string): string {
   let result = source.replace(/\^\s*\{([^{}]*)\}/g, "^($1)");
   result = result.replace(/_\s*\{([^{}]*)\}/g, "");
@@ -173,6 +199,7 @@ export function latexToExpr(latex: string): string {
   source = replaceFractions(source);
   source = replaceRoots(source);
   source = convertFunctionCommands(source);
+  source = normalizeShorthandFunctions(source);
   source = convertSuperscripts(source);
   source = source.replace(/\\cdot|\\times/g, "*").replace(/\\div/g, "/");
   source = convertAbsoluteValues(source).replace(/[{}]/g, "");
