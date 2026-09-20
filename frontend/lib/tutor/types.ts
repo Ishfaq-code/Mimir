@@ -33,6 +33,7 @@ export type TutorAnnotation = TutorLatexAnnotation;
 
 export interface CanvasState {
   revision: number;
+  question: { text: string; source: "screenshot"; confirmed: true } | null;
   equations: RecognizedEquation[];
   tutorAnnotations: TutorAnnotation[];
 }

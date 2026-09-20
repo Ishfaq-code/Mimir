@@ -16,11 +16,13 @@ import type {
   Tool,
 } from "@/lib/canvas/types";
 import { DEFAULT_STYLE, pointXY } from "@/lib/canvas/types";
-import { renderScene } from "@/lib/canvas/renderer";
+import { renderScene, type CanvasScreenshot } from "@/lib/canvas/renderer";
+import type { Screenshot } from "@/lib/screenshot";
 import IslandToolbar from "./IslandToolbar";
 import Icon from "./Icon";
 import { setRecognizedWork } from "@/lib/tutor/store";
 import TutorOverlay from "./TutorOverlay";
+import CanvasTextEditor, { type TextDraft } from "./CanvasTextEditor";
 
 
 // ── helpers (module‑level, no closures) ─────────────────────────────
@@ -147,16 +149,17 @@ const RECOGNITION_PAUSE_MS = Number(process.env.NEXT_PUBLIC_RECOGNITION_PAUSE_MS
 
 interface InfiniteCanvasProps {
   dark: boolean;
-  initialElements: CanvasElement[];
-  onSceneChange: (elements: CanvasElement[]) => void;
+  screenshot: Screenshot | null;
+  onPasteScreenshot: () => void;
 }
 
-export default function InfiniteCanvas({ dark, initialElements, onSceneChange }: InfiniteCanvasProps) {
+export default function InfiniteCanvas({ dark, screenshot, onPasteScreenshot }: InfiniteCanvasProps) {
   // ── refs ────────────────────────────────────────────────────────
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
 
-  const elementsRef = useRef<CanvasElement[]>(cloneElements(initialElements));
+  const elementsRef = useRef<CanvasElement[]>([]);
+  const screenshotRef = useRef<CanvasScreenshot | null>(null);
   const cameraRef = useRef<Camera>({ x: 0, y: 0, zoom: 1 });
   const selectedRef = useRef<Set<string>>(new Set());
   const toolRef = useRef<Tool>("freedraw");
@@ -168,7 +171,7 @@ export default function InfiniteCanvas({ dark, initialElements, onSceneChange }:
   const curElRef = useRef<CanvasElement | null>(null);
   const spaceRef = useRef(false);
 
-  const historyRef = useRef<CanvasElement[][]>([cloneElements(initialElements)]);
+  const historyRef = useRef<CanvasElement[][]>([[]]);
   const histIdxRef = useRef(0);
   const hiddenMathIdsRef = useRef<Set<string>>(new Set());
   const recognitionSocketRef = useRef<WebSocket | null>(null);
@@ -183,7 +186,7 @@ export default function InfiniteCanvas({ dark, initialElements, onSceneChange }:
   const [tool, _setTool] = useState<Tool>("freedraw");
   const [style, _setStyle] = useState<ElementStyle>({ ...DEFAULT_STYLE, strokeColor: dark ? "#ffffff" : DEFAULT_STYLE.strokeColor });
   const [zoom, setZoomUI] = useState(100);
-  const [hasInk, setHasInk] = useState(initialElements.some(el => !el.isDeleted));
+  const [hasInk, setHasInk] = useState(false);
   const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
   const [recognitionError, setRecognitionError] = useState(false);
   const [latexEnabled, setLatexEnabled] = useState(false);
@@ -191,8 +194,8 @@ export default function InfiniteCanvas({ dark, initialElements, onSceneChange }:
   const [recognizing, setRecognizing] = useState(false);
   const [overlayVersion, setOverlayVersion] = useState(0);
   const [overlayCamera, setOverlayCamera] = useState<Camera>({ x: 0, y: 0, zoom: 1 });
-  const [editingText, setEditingText] = useState<{ worldX: number; worldY: number; screenX: number; screenY: number } | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [editingText, setEditingText] = useState<TextDraft | null>(null);
+  const textDraftRef = useRef<TextDraft | null>(null);
 
   const setTool = useCallback((t: Tool) => { toolRef.current = t; _setTool(t); }, []);
 
@@ -202,7 +205,9 @@ export default function InfiniteCanvas({ dark, initialElements, onSceneChange }:
     const cvs = canvasRef.current;
     if (!ctx || !cvs) return;
     const dpr = window.devicePixelRatio || 1;
-    renderScene(ctx, cvs.width / dpr, cvs.height / dpr, elementsRef.current, selectedRef.current, cameraRef.current, darkRef.current, hiddenMathIdsRef.current);
+    const hiddenIds = new Set(hiddenMathIdsRef.current);
+    if (textDraftRef.current?.elementId) hiddenIds.add(textDraftRef.current.elementId);
+    renderScene(ctx, cvs.width / dpr, cvs.height / dpr, elementsRef.current, selectedRef.current, cameraRef.current, darkRef.current, hiddenIds, screenshotRef.current);
   }, []);
 
   const updateStyle = useCallback((u: Partial<ElementStyle>) => {
@@ -388,8 +393,7 @@ export default function InfiniteCanvas({ dark, initialElements, onSceneChange }:
   const syncScene = useCallback(() => {
     setHasInk(elementsRef.current.some(el => !el.isDeleted));
     setHistoryState({ canUndo: histIdxRef.current > 0, canRedo: histIdxRef.current < historyRef.current.length - 1 });
-    onSceneChange(cloneElements(elementsRef.current));
-  }, [onSceneChange]);
+  }, []);
 
   // ── history ─────────────────────────────────────────────────────
   const pushHistory = useCallback(() => {
@@ -445,7 +449,7 @@ export default function InfiniteCanvas({ dark, initialElements, onSceneChange }:
     const wp = screenToWorld(sp.x, sp.y, cam);
     const activeTool: Tool = spaceRef.current ? "hand" : toolRef.current;
 
-    if (e.button === 1 || activeTool === "hand" || e.pointerType === "touch") {
+    if (e.button === 1 || activeTool === "hand" || (e.pointerType === "touch" && activeTool !== "text")) {
       actionRef.current = { type: "panning", startCam: { x: cam.x, y: cam.y }, startPtr: sp };
       return;
     }
@@ -495,7 +499,19 @@ export default function InfiniteCanvas({ dark, initialElements, onSceneChange }:
         break;
       }
       case "text": {
-        setEditingText({ worldX: wp.x, worldY: wp.y, screenX: sp.x, screenY: sp.y });
+        e.preventDefault();
+        const hit = hitTest(elementsRef.current, wp.x, wp.y);
+        const existing = hit?.type === "text" ? hit : null;
+        const draft: TextDraft = {
+          key: genId(), elementId: existing?.id,
+          x: existing?.x ?? wp.x, y: existing?.y ?? wp.y,
+          text: existing?.text ?? "", color: existing?.style.strokeColor ?? styleRef.current.strokeColor,
+          fontSize: existing?.fontSize ?? 20,
+        };
+        textDraftRef.current = draft;
+        setEditingText(draft);
+        actionRef.current = { type: "none" };
+        render();
         break;
       }
       case "eraser": {
@@ -600,11 +616,28 @@ export default function InfiniteCanvas({ dark, initialElements, onSceneChange }:
 
   // ── text editing ────────────────────────────────────────────────
 
-  const finalizeText = () => {
-    const val = textareaRef.current?.value.trim();
-    if (!val || !editingText) { setEditingText(null); return; }
+  const cancelText = useCallback((key: string) => {
+    if (textDraftRef.current?.key !== key) return;
+    textDraftRef.current = null;
+    setEditingText(null);
+    render();
+  }, [render]);
+
+  const finalizeText = useCallback((text: string, key: string) => {
+    const draft = textDraftRef.current;
+    if (!draft || draft.key !== key) return;
+    textDraftRef.current = null;
+    setEditingText(null);
+    const val = text.trimEnd();
+    const existing = elementsRef.current.find(el => el.id === draft.elementId);
+    if (!val.trim()) {
+      if (existing) { existing.isDeleted = true; pushHistory(); }
+      render();
+      return;
+    }
+    if (existing?.type === "text" && existing.text === val) { render(); return; }
     const ctx = ctxRef.current;
-    const fontSize = 20;
+    const fontSize = draft.fontSize;
     let w = 100, h = fontSize * 1.2;
     if (ctx) {
       ctx.save();
@@ -614,15 +647,33 @@ export default function InfiniteCanvas({ dark, initialElements, onSceneChange }:
       h = lines.length * fontSize * 1.2;
       ctx.restore();
     }
-    const el: TextElement = { id: genId(), type: "text", x: editingText.worldX, y: editingText.worldY, width: w, height: h, text: val, fontSize, style: { ...styleRef.current }, isDeleted: false };
-    elementsRef.current.push(el);
+    if (existing?.type === "text") {
+      Object.assign(existing, { text: val, width: w, height: h });
+    } else {
+      const el: TextElement = { id: genId(), type: "text", x: draft.x, y: draft.y, width: w, height: h, text: val, fontSize, style: { ...styleRef.current, strokeColor: draft.color }, isDeleted: false };
+      elementsRef.current.push(el);
+    }
     pushHistory();
-    setEditingText(null);
-    setTool("select");
     render();
-  };
+  }, [pushHistory, render]);
 
   // ── effects ─────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!screenshot || !canvas) return;
+    const bounds = canvas.getBoundingClientRect();
+    const camera = cameraRef.current;
+    const image = screenshot.image;
+    const scale = Math.min(1, Math.max(120, bounds.width - 64) / image.naturalWidth, Math.max(100, bounds.height * .42) / image.naturalHeight);
+    screenshotRef.current = {
+      image, x: camera.x + 32 / camera.zoom, y: camera.y + 76 / camera.zoom,
+      width: image.naturalWidth * scale / camera.zoom,
+      height: image.naturalHeight * scale / camera.zoom,
+    };
+    clearRecognition();
+    render();
+  }, [screenshot, clearRecognition, render]);
 
   // resize & DPR
   useEffect(() => {
@@ -681,7 +732,7 @@ export default function InfiniteCanvas({ dark, initialElements, onSceneChange }:
       if (k === " ") { spaceRef.current = true; e.preventDefault(); return; }
 
       if (!e.ctrlKey && !e.metaKey) {
-        const map: Record<string, Tool> = { p: "freedraw", "1": "freedraw", e: "eraser", "2": "eraser" };
+        const map: Record<string, Tool> = { p: "freedraw", "1": "freedraw", e: "eraser", "2": "eraser", t: "text", "3": "text" };
         if (map[k]) { setTool(map[k]); return; }
       }
 
@@ -790,36 +841,26 @@ export default function InfiniteCanvas({ dark, initialElements, onSceneChange }:
       {/* ── tutor layer (recognized math + tutor annotations) ─── */}
       <TutorOverlay camera={overlayCamera} />
 
-      {!hasInk && <div className="canvas-empty"><div className="empty-ink-mark"><svg viewBox="0 0 92 34" fill="none" aria-hidden="true"><path d="M4 25C18 5 29 3 24 18s-14 13-9 5S38 7 42 13s-11 18-8 11S50 6 56 12s-10 17-5 12S66 9 72 16s5 9 16-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg></div><h2>Start with what you know.</h2><p>Your pencil, your pace. There’s room to figure it out.</p></div>}
+      {!hasInk && !screenshot && !editingText && <div className="canvas-empty"><button className="empty-paste" onClick={onPasteScreenshot}><Icon name="clipboard" size={25}/><span>Paste a screenshot</span></button></div>}
 
-      <div className="canvas-topline"><span className="canvas-label"><span className="small-dot"/>YOUR WORKSPACE</span><button type="button" role="switch" aria-label="Typeset handwriting" aria-checked={latexEnabled} onClick={toggleLatex} className={`latex-toggle ${latexEnabled ? "is-on" : ""}`}><span className="math-symbol">ƒ</span><span>{recognizing ? "Reading your math…" : "Typeset math"}</span><span className="switch-track"><span/></span></button></div>
+      <div className="canvas-topline">
+        {screenshot && <button className="show-question" onClick={() => {
+          const image = screenshotRef.current;
+          if (!image) return;
+          const bounds = canvasRef.current!.getBoundingClientRect();
+          const fit = Math.min(1, (bounds.width - 64) / image.width, (bounds.height * .5) / image.height);
+          cameraRef.current = { x: image.x - 32 / fit, y: image.y - 76 / fit, zoom: fit };
+          setOverlayCamera(cameraRef.current); setZoomUI(Math.round(fit * 100)); render();
+        }}><Icon name="fit" size={16}/><span>Show question</span></button>}
+        <button type="button" role="switch" aria-label="Typeset handwriting" aria-checked={latexEnabled} onClick={toggleLatex} className={`latex-toggle ${latexEnabled ? "is-on" : ""}`}><span className="math-symbol">ƒ</span><span>{recognizing ? "Reading your math…" : "Typeset math"}</span><span className="switch-track"><span/></span></button>
+      </div>
       {recognitionError && <div className="recognition-notice" role="status">Couldn’t convert that yet. Your handwriting is safe.<button onClick={retryRecognition}>Try again</button></div>}
 
       <IslandToolbar tool={tool} onToolChange={setTool} style={style} onStyleChange={updateStyle} onUndo={undo} onRedo={redo} canUndo={historyState.canUndo} canRedo={historyState.canRedo}/>
-      <div className="canvas-footer"><span className="navigation-tip">Space + drag to move <span>·</span> Finger to pan</span><div className="zoom-controls"><button className="icon-button" type="button" onClick={() => zoomTo(Math.max(0.1, cameraRef.current.zoom / 1.25))} aria-label="Zoom out"><Icon name="minus" size={16}/></button><button className="zoom-percentage" type="button" onClick={() => zoomTo(1)} aria-label="Reset zoom to 100 percent">{zoom}%</button><button className="icon-button" type="button" onClick={() => zoomTo(Math.min(10, cameraRef.current.zoom * 1.25))} aria-label="Zoom in"><Icon name="plus" size={16}/></button></div></div>
+      <div className="canvas-footer"><div className="zoom-controls"><button className="icon-button" type="button" onClick={() => zoomTo(Math.max(0.1, cameraRef.current.zoom / 1.25))} aria-label="Zoom out"><Icon name="minus" size={16}/></button><button className="zoom-percentage" type="button" onClick={() => zoomTo(1)} aria-label="Reset zoom to 100 percent">{zoom}%</button><button className="icon-button" type="button" onClick={() => zoomTo(Math.min(10, cameraRef.current.zoom * 1.25))} aria-label="Zoom in"><Icon name="plus" size={16}/></button></div></div>
 
-      {/* ── text input overlay ──────────── */}
-      {editingText && (
-        <textarea
-          ref={textareaRef}
-          className="absolute resize-none border-2 border-blue-500 bg-transparent p-1 outline-none"
-          style={{
-            left: editingText.screenX,
-            top: editingText.screenY,
-            fontSize: `${20 * cameraRef.current.zoom}px`,
-            lineHeight: "1.2",
-            color: styleRef.current.strokeColor,
-            minWidth: 40,
-            minHeight: 28,
-          }}
-          autoFocus
-          onBlur={finalizeText}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") setEditingText(null);
-            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); finalizeText(); }
-          }}
-        />
-      )}
+      {editingText && <CanvasTextEditor key={editingText.key} draft={editingText} camera={overlayCamera} onCommit={finalizeText} onCancel={cancelText}/>}
+
     </div>
   );
 }

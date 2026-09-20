@@ -1,126 +1,105 @@
 # Mimir project context
 
-Updated **2026-09-19** after the frontend revamp and integration of the `latex` branch. This supersedes the original `568b8fd` inspection. Read [PRODUCT.md](../PRODUCT.md) for requirements and [DESIGN.md](../DESIGN.md) for the current visual system.
+Updated **2026-09-19** after screenshot import/OCR review, text-tool work, and integration of the `latex` branch. Read [PRODUCT.md](../PRODUCT.md) for intent and [DESIGN.md](../DESIGN.md) for current UI conventions.
 
 ## Current experience
 
-Mimir is a browser math practice workspace for iPad and Apple Pencil. The frontend now has a problem header, open dot-grid canvas, bottom drawing toolbar, and a responsive tutor sidebar. Light is the initial theme; the header offers dark mode. Three prepared algebra problems include hints, illustrative diagrams, and worked steps. The prepared guides are labeled and do not pretend to inspect student work.
+Mimir is an iPad-oriented math workspace. The student pastes a screenshot directly into the whiteboard using the native paste command or Paste screenshot button. The image is placed in world coordinates behind the ink. Browser-based OCR reads the question; a side panel asks “Is this right?” and provides editable text. Confirming enables live voice and publishes the reviewed text to the tutor. Preset questions, prepared guides, and decorative copy have been removed.
 
-Remote changes pulled during the revamp added MyScript conversion, LiveKit/OpenAI voice tutoring, and tutor-owned LaTeX annotations. These were preserved and integrated into the new layout. Actual provider credentials and a running Python agent are still required for the external services.
-
-Repository: `Ishfaq-code/Mimir`. Local path: `/Users/stevin/Documents/Projects/Mimir`. The `stevin-port` portfolio and older Margin prototype are separate projects. Use Mimir's working directory explicitly.
+Repository: `Ishfaq-code/Mimir`. Local root: `/Users/stevin/Documents/Projects/Mimir`. The thread's default `stevin-port` directory is a separate project. Work on `main`, pull before implementation, preserve collaborators, and never force-push.
 
 ## Capability inventory
 
 | Feature | Current behavior |
 | --- | --- |
-| Writing | Custom Canvas 2D with Pointer Events and quadratic smoothing. Pen remains active and strokes stay unselected. |
-| Drawing tools | Pen/Eraser, eight colors including white, widths 1/2/4, visible undo/redo. |
-| Navigation | Wheel pan, modifier-wheel zoom, Space/middle-button drag, finger pan, zoom buttons. Active pointer guard ignores competing pointers during a gesture. |
-| Practice | Three selectable algebra problems; each retains ink in memory while switching. History/tool/camera reset on remount. |
-| Prepared guides | Per-problem hints, SVG visualizations, and incremental worked examples in the sidebar. |
-| MyScript | Optional Typeset math switch groups completed strokes after a configurable pause (2 seconds by default) and calls `/ws/latex`. Successful results render at the original size, position, and ink color and are exposed to the voice tutor's canvas context. |
+| Screenshot input | Native image paste or Clipboard API button. PNG, JPEG, WebP, GIF; 12 MB / 32 million pixel limits. Input errors preserve the existing question. |
+| Screenshot on board | One current reference image behind student ink. Moves with pan/zoom; Show question returns the camera to it. New screenshots replace the reference and preserve ink/history. The reference is not an erasable stroke. |
+| Screenshot OCR | Tesseract.js 7, English LSTM data, browser worker, same-origin assets. No credentials, upload, or provider charge for OCR. Maximum OCR dimension 2400 px; 90 second timeout. |
+| Review | Editable plain text, empty confirmation disabled, retry/manual fallback, cancellation and stale-result guards. Normal text paste remains available inside the correction field. |
+| Voice context | `CanvasState.question` holds only confirmed text, separate from recognized student equations. Editing/replacing clears it and unmounts/disconnects voice. Closing the sidebar preserves voice. |
+| Textboxes | Select Text (T), tap to place or edit. Done/Enter saves, Shift+Enter adds a line, Escape/Cancel discards. Uses ink color; undo/redo and eraser apply. Text remains visual canvas content, separate from question confirmation and stroke recognition. |
+| Handwriting | Existing custom Canvas 2D engine. Pen stays selected; no stroke selection handles. Eight colors including white, widths 1/2/4, undo/redo. |
+| Navigation | Wheel pan, modifier-wheel zoom, Space/middle-button drag, finger pan, zoom controls. |
+| MyScript | Optional Typeset math switch recognizes freehand strokes via backend `/ws/latex`. Separate from screenshot OCR. |
+| Typeset math | Completed strokes are grouped after a configurable pause (2 seconds by default); normalized KaTeX overlays preserve source bounds/color and are exposed to the tutor context. |
 | Live voice | `VoiceTutor` obtains a token, joins LiveKit, publishes microphone audio, plays remote audio, and registers canvas RPCs. |
-| Tutor annotations | Agent can inspect current problem/recognized work and call `write_latex`; annotations use world coordinates above the ink. |
-| Error states | Recognition failures preserve ink and offer retry. Voice failures display a retryable error. |
-| Persistence | Visit memory only. Closing the sidebar retains guides and any voice session; reload loses the visit. |
-| Still absent | Teacher reports, accounts, database storage, imported questions, general visualization generation, glow/circle tools, stroke-animated demonstrations, reliable proactive error detection. |
+| Tutor annotations | Configured LiveKit/OpenAI agent can read canvas context and write LaTeX through RPC. |
+| Error states | Recognition failures preserve ink and expose retry. Voice failures show a recoverable error. |
+| Persistence | In-memory visit only. Reload clears image, reviewed question, and ink. |
+| Absent | Accounts, teacher reports, durable storage, other import methods, generated visualizations, precise highlighting, animated demonstrations, reliable proactive error detection. |
 
-## Stack and dependencies
-
-- Next.js 16.3.5, React 19.2.8, TypeScript strict mode, Tailwind CSS 4, Geist UI font, KaTeX, `livekit-client`.
-- FastAPI 0.115.12, Uvicorn 0.34.2, httpx, python-dotenv, LiveKit API.
-- Separate Python worker in `agent/`, using LiveKit Agents and OpenAI Realtime. The worker is not a Docker Compose service.
-- Docker uses Node 22 and Python 3.12. No Excalidraw SDK is installed.
-- One application route, `/`; no Next API routes.
+## Ownership and data flow
 
 ```mermaid
 flowchart TD
-  Page[app/page.tsx] --> Workspace[PracticeWorkspace: problem, theme, panel, visit work]
-  Workspace --> Canvas[InfiniteCanvas: ink, history, camera, recognition]
-  Workspace --> Guide[ChatPanel: prepared hints and visuals]
-  Workspace --> Voice[VoiceTutor: LiveKit room and microphone]
-  Canvas --> Renderer[canvas/renderer.ts]
-  Canvas --> WS[FastAPI /ws/latex]
-  WS --> MyScript[MyScript Cloud]
-  Canvas --> Store[tutor/store: problem and current recognized work]
-  Store --> Overlay[TutorOverlay: tutor-owned LaTeX]
-  Voice --> Token[FastAPI /token]
-  Voice --> LiveKit[LiveKit + Python agent + OpenAI Realtime]
-  LiveKit --> RPC[get_canvas_state / write_latex]
+  Workspace[PracticeWorkspace: paste and review UI] --> Import[useScreenshotQuestion: import / OCR / review / confirm]
+  Import --> OCR[screenshot.ts: local Tesseract worker]
+  Import --> Store[tutor/store: confirmed question]
+  Workspace --> Canvas[InfiniteCanvas: ink / camera / screenshot placement]
+  Canvas --> Renderer[canvas/renderer: reference image then ink]
+  Canvas --> MyScript[FastAPI /ws/latex]
+  MyScript --> Store
+  Workspace --> Voice[VoiceTutor: LiveKit microphone and audio]
+  Voice --> Agent[Python worker + OpenAI Realtime]
+  Agent --> RPC[get_canvas_state / write_latex]
   RPC --> Store
+  Store --> Overlay[TutorOverlay: world-positioned LaTeX]
 ```
-
-## Where changes belong
 
 | File | Responsibility |
 | --- | --- |
-| `frontend/components/PracticeWorkspace.tsx` | App shell, selected problem, retained per-problem ink, theme, sidebar state and responsive accessibility. |
-| `frontend/lib/problems.ts` | Three prepared problems, hints, worked steps, and visual captions. |
-| `frontend/components/InfiniteCanvas.tsx` | Existing drawing engine, history, camera, Pointer Events, recognition WebSocket, rendering overlays. |
-| `frontend/components/IslandToolbar.tsx` | Pen/Eraser, ink options popover, width, undo/redo. |
-| `frontend/components/ChatPanel.tsx` | Prepared problem guide and SVG illustrations. It is not the live model's transcript. |
-| `frontend/components/VoiceTutor.tsx` | LiveKit lifecycle, microphone/audio, connection state, errors. Kept mounted when sidebar closes; replaced/disconnected on problem changes. |
-| `frontend/components/TutorOverlay.tsx` | World-positioned KaTeX annotations. Does not duplicate recognized student work already rendered by the canvas. |
-| `frontend/components/Icon.tsx` | Shared inline SVG icons and Mimir mark. |
-| `frontend/app/globals.css` | Semantic OKLCH tokens, light/dark themes, layout, components, responsive and reduced-motion rules. |
-| `frontend/lib/canvas/types.ts`, `renderer.ts` | Geometry/camera types, point normalization, painting and smoothing. |
-| `frontend/lib/tutor/store.ts` | Current problem, current recognition, tutor annotations, revision and subscriptions. |
-| `frontend/lib/tutor/tutorCanvas.ts`, `livekit/rpc.ts` | Browser-side tutor abstraction and RPC methods. |
-| `backend/main.py` | `/`, `/health`, `/token`, `/ws/latex`, MyScript signing and requests, CORS. |
-| `agent/main.py`, `tutor.py`, `tools/canvas.py`, `prompts.py` | Live voice agent, tool dispatch, tutoring instructions. |
-| `spec.md` | Collaborator's broader voice-tutor specification, including future milestones. Code determines which parts are implemented. |
+| `frontend/components/PracticeWorkspace.tsx` | Header, native paste listener, Clipboard API button, question review, theme, responsive panel, confirmation-gated voice. |
+| `frontend/lib/useScreenshotQuestion.ts` | Screenshot lifecycle, asynchronous import versions, abortable OCR, editable text, confirmation and tutor context. |
+| `frontend/lib/screenshot.ts` | File validation/decode, Tesseract lazy import, OCR progress/timeout/cancellation, worker cleanup. |
+| `frontend/scripts/prepare-ocr.mjs` | Copies installed worker, core variants, language data, and licenses to ignored `public/ocr/` before dev/build. |
+| `frontend/components/InfiniteCanvas.tsx` | Existing stroke capture/history/recognition, camera, reference image placement, canvas tools. |
+| `frontend/lib/canvas/renderer.ts` | World-space image followed by ink painting. Existing smoothing is unchanged. |
+| `frontend/components/IslandToolbar.tsx` | Pen/Eraser/Text, colors/width, undo/redo. |
+| `frontend/components/CanvasTextEditor.tsx` | Positioned textbox editor, multiline input, outside-click save, cancellation and focus handling. |
+| `frontend/components/VoiceTutor.tsx` | Existing LiveKit token, room, microphone/audio and RPC lifecycle. |
+| `frontend/lib/tutor/store.ts`, `types.ts` | Separate confirmed question, recognized equations, tutor annotations, revisions/subscriptions. |
+| `frontend/components/TutorOverlay.tsx` | KaTeX annotations aligned with camera. |
+| `frontend/app/globals.css` | Warm neutral / green tokens, dark theme, controls, review panel, responsive and reduced-motion rules. |
+| `backend/main.py` | Health, token minting, MyScript WebSocket recognition and CORS. |
+| `agent/prompts.py` | Tutor reads confirmed question as problem data, distinct from student work and role instructions. |
 
-`components/Canvas.tsx`, `components/LatexPreview.tsx`, and `lib/recognizer.ts` remain older unused scaffolding. The active MyScript pipeline is inside `InfiniteCanvas.tsx`, not that legacy recognizer.
+`components/Canvas.tsx`, `LatexPreview.tsx`, and `lib/recognizer.ts` are disconnected scaffolding. There is no Excalidraw SDK. `ChatPanel.tsx` and `lib/problems.ts` were removed with the preset flow. `spec.md` includes planned agent tools that do not all exist yet.
 
-## Ink and coordinate contracts
+## Contracts and limitations
 
-The source of truth is `CanvasElement[]`, not pixels. A freehand element has a stable ID, origin, dimensions, style, deletion flag, and relative `{x,y,t}` points. The active recognition buffer additionally retains world x/y, wall-clock timestamps, pressure, and pointer type. Line/arrow elements still use tuples; use `pointXY` when traversing mixed element types.
+Student work remains `CanvasElement[]`, with relative freehand points and timestamps. World-to-screen coordinates are `(point - camera position) * zoom`; DPR affects backing bitmap only. The reference image is a separate read-only layer, so erasing/undo touches ink rather than accidentally deleting the question. A new paste anchors the reference in the current viewport. A screenshot is never sent to MyScript, which requires stroke geometry.
 
-```text
-world point  = element origin + relative point
-screen point = (world point - camera position) * camera.zoom
-world point  = screen point / camera.zoom + camera position
-```
+OCR targets clear printed English and basic algebra. It produces text, not structural math or diagram understanding. Fractions, powers, handwriting, and diagrams can need corrections. Every OCR result requires review, regardless of confidence. Only the confirmed text reaches the voice RPC context; OCR itself sends no image off-device. Voice and MyScript remain external services when explicitly activated.
 
-Screen coordinates are CSS pixels relative to the canvas. DPR scales only the backing bitmap. Freehand origins are the first pen position, not necessarily the upper-left bound; derive bounds from all points. The renderer uses the existing quadratic smoothing and round caps/joins. The eraser removes entire elements through padded bounding-box hit testing, not pixel erasure.
+`setConfirmedQuestion(null)` clears previous question, recognized work, and annotations. New handwriting recognition remains independent and can later repopulate student equations. The image/text/ink have no durable storage. Opening a fresh question keeps existing ink intentionally; it does not silently erase the student's page.
 
-`ResizeObserver` resizes the backing store when the sidebar changes canvas width. On completed edits, a cloned scene is retained by `PracticeWorkspace` for the active problem. Undo/redo is local to the mounted canvas. Stored ink keeps literal colors across themes; white ink can be hard to see on the light canvas and black ink on the dark canvas. Theme changes adapt the next default pen color only.
+The handwritten expression recognizer still treats the entire freehand scene as one expression. Success temporarily replaces visible ink with KaTeX; new strokes or disabling conversion restore ink. Exact region matching and proactive tutoring remain future work.
 
-## Recognition and voice boundaries
+## Runtime
+
+See [README.md](../README.md). Next.js 16.3.5 / React 19 / TypeScript, Tesseract.js 7, KaTeX, LiveKit client. FastAPI backend and separate Python LiveKit agent. Docker uses Node 22 / Python 3.12. Frontend production is on port 3000, backend on 8000. Rebuild the frontend container for changes; the backend mounts source with reload. Run `npm run dev` for hot reload.
 
 - Recognition is opt-in. `/ws/latex` round-trips request and stroke IDs with structured strokes so each response maps back to its source ink.
 - The current pipeline groups unrecognized strokes completed within the configured pause into one expression. It can retain multiple recognized overlays, but does not semantically segment lines, regions, or individual symbols.
 - Successful recognition hides only its source ink and overlays normalized KaTeX without deleting geometry. Disabling conversion restores all original ink.
-- The tutor store includes the selected problem as known context (`practice-problem`) and, when available, the current recognized expression (`student-work`). It starts without fabricated student ink.
-- Prepared hints are local content. Live voice and annotations come from the separately configured agent. Do not present prepared hints as evidence of AI understanding.
-- Changing problems clears stale recognized context and tutor annotations and disconnects the old voice component. Closing the sidebar preserves the voice session; reopen Tutor to end it.
+- Only confirmed screenshot text enters `CanvasState.question`; recognized student equations remain separate context. The store starts without fabricated student ink.
+- Changing or replacing a question clears stale recognized context and tutor annotations and disconnects the old voice component. Closing the sidebar preserves the voice session.
 - The agent currently has `get_canvas_state` and `write_latex`; other tools mentioned in its broader prompt/spec are not implemented yet.
 
-## Runtime and setup
+Screenshot OCR works without provider keys. Its lazy-loaded assets come from `/ocr/` on this app, generated before build/dev and excluded from Git, lint, and Docker input context. Docker's builder regenerates them and its runner serves them from public.
 
-See [README.md](../README.md) for exact commands. Frontend is on `3000`, backend on `8000`. Docker frontend is a production build with no source mount. Backend uses a source mount and Uvicorn reload; dependency changes still require rebuilding.
+`backend/.env` is an ignored comment-only local file, sufficient to start Compose. Configure MyScript/LiveKit there and OpenAI/LiveKit in `agent/.env`; the agent runs separately. No provider credentials were supplied during these changes. Defaults use the browser hostname on backend port 8000. Backend CORS currently allows only `http://localhost:3000`; configure origins deliberately for a tunnel/deployment. iPad Clipboard API and microphone access need a secure supported origin; localhost on desktop does not verify iPad HTTPS readiness.
 
-`backend/.env` is ignored and must exist for Compose. No provider credentials were supplied during the revamp; a comment-only local file was created to allow the core app to run. Configure MyScript/LiveKit from `backend/.env.example`, and OpenAI/LiveKit worker settings from `agent/.env.example`. Never place provider secrets in a `NEXT_PUBLIC_*` variable.
+## Verification
 
 Frontend overrides: `NEXT_PUBLIC_TOKEN_URL`, `NEXT_PUBLIC_RECOGNIZER_WS_URL`, and `NEXT_PUBLIC_RECOGNITION_PAUSE_MS`. Network defaults use the browser hostname and backend port 8000; the recognition pause defaults to 2000 ms. Production/tunnel URLs and CORS need deliberate configuration. The current backend CORS list is only `http://localhost:3000`. iPad microphone access requires an appropriate secure browser origin; desktop localhost does not establish iPad HTTPS readiness.
 
-## Verification record
+The frontend revamp covered pen/eraser, history, colors, themes, recognition/voice failure states, responsive layouts, screenshot OCR review, and the Text tool. Browser checks exercised a clipboard PNG (`Solve for x. 2(x + 3) = 14`), correction/confirmation, empty submission blocking, cancellation, repeat paste, blank-image fallback, ink preservation, and multiline text editing. A store contract check verified only confirmed text becomes question context and clearing it removes stale work/annotations.
 
-The frontend revamp was checked with ESLint, TypeScript, and Docker production builds. Browser checks covered pen drawing, erasing, undo/redo, per-problem ink retention, color options/white ink, theme changes, panel resizing, hints, SVG visuals, worked steps, and layouts at desktop, 1024 × 768, and 390 × 844. A focused store check verified that clearing recognition preserves the known problem and that changing problems clears stale context.
+ESLint, TypeScript, and the Docker production build passed. Production OCR was also verified through the Paste screenshot button against real PNG clipboard data, with no browser runtime errors. Screenshot import passed desktop browser checks. The browser viewport override did not change the measured viewport during this run, so mobile layout and physical iPad clipboard/Pencil behavior still need a device check. Do not claim a hardware pass. No real LiveKit/OpenAI/MyScript provider roundtrip was completed.
 
-The production containers were restarted successfully; `/health` returned OK. Without credentials, `/token` returned the expected configuration failure, and the browser showed a recoverable voice error. Recognition failure/retry UI was also checked and preserved the ink.
+The Text tool was checked by creating multiline text, reopening it, saving corrections, canceling, undoing/redoing edits, clicking outside to create another box, switching to Pen, and erasing a textbox. Lint, TypeScript, and the production build passed. Physical iPad keyboard behavior remains unverified.
 
-No real provider session or physical Apple Pencil test was completed. A visual viewport check is not a hardware test. No permanent automated test suite is configured. Keep actual external-service verification separate from frontend checks.
+## Next work
 
-## Remaining technical work
-
-- Configure and validate the full voice/recognition path on the actual iPad.
-- Improve region recognition and confidence handling before proactive tutoring.
-- Add precise highlighting, animated demonstrations, and durable visit storage.
-- Verify palm rejection and multi-touch navigation. Current finger gestures pan; pressure is captured for recognition but does not affect stroke width.
-- Decide how to persist history/camera per problem. Current problem switching preserves ink only.
-- Consider single-point ink dots, precise erasing, history memory, and full-scene redraw cost for long sessions.
-- Revisit accessibility beyond the current labels, focus treatment, responsive inert workspace, and reduced-motion rules. No formal conformance level has been established.
-
-The user's workflow is direct work on `main`, with a fresh pull before new changes and preservation of collaborators' work. Keep this context current when integrations or product decisions change.
+Validate native screenshot paste and review on the actual iPad; configure and exercise live tutoring. Consider math-specialized OCR for notation beyond simple printed algebra. Later inputs should feed the existing import/review/confirm boundary. Preserve cancellation, confirmation gating, and normal text editing. Add region-based handwriting context, precise annotations, generated visualizations, and persistence after the core demo works.

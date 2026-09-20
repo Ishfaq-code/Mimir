@@ -12,6 +12,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "public/ocr/**", // Generated third-party worker and WASM bundles.
   ]),
 ]);
 

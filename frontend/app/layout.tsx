@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Mimir | Your space to think",
+  title: "Mimir",
   description: "Work through math in your own handwriting, with a tutor beside you.",
 };
 
