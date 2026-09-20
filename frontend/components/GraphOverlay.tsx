@@ -212,8 +212,10 @@ export default function GraphOverlay({
     try {
       const expression = latexToExpr(graph.latex);
       const variables = Object.fromEntries(extractVariables(expression).map(name => [name, 1]));
-      const initialPoints = computeCurve(expression, variables, DEFAULT_VIEWPORT.xMin, DEFAULT_VIEWPORT.xMax, CURVE_STEPS);
-      const values = initialPoints.filter((point): point is [number, number] => point !== null).map(point => point[1]);
+       const initialPoints = computeCurve(expression, variables, DEFAULT_VIEWPORT.xMin, DEFAULT_VIEWPORT.xMax, CURVE_STEPS);
+       const values = initialPoints
+         .filter((point): point is [number, number] => point !== null && Math.abs(point[1]) < 10000)
+         .map(point => point[1]);
       if (!values.length) return DEFAULT_VIEWPORT;
       const min = Math.min(...values), max = Math.max(...values);
       const padding = Math.max(1, (max - min) * 0.15);
@@ -240,6 +242,10 @@ export default function GraphOverlay({
   const [sliderValues, setSliderValues] = useState<Record<string, number>>(
     () => Object.fromEntries(sliderVars.map((v) => [v, 1])),
   );
+  const effectiveSliderValues = useMemo(
+    () => Object.fromEntries(sliderVars.map((name) => [name, sliderValues[name] ?? 1])),
+    [sliderVars, sliderValues],
+  );
 
   // Screen-space position and size
   const left = (graph.x - camera.x) * camera.zoom;
@@ -255,11 +261,14 @@ export default function GraphOverlay({
   const points = useMemo(() => {
     if (parsed.error || !expr) return [];
     try {
-      return computeCurve(expr, sliderValues, viewport.xMin, viewport.xMax, CURVE_STEPS);
+      return computeCurve(expr, effectiveSliderValues, viewport.xMin, viewport.xMax, CURVE_STEPS, {
+        yMin: viewport.yMin,
+        yMax: viewport.yMax,
+      });
     } catch {
       return [];
     }
-  }, [expr, parsed.error, sliderValues, viewport.xMin, viewport.xMax]);
+  }, [expr, parsed.error, effectiveSliderValues, viewport.xMin, viewport.xMax, viewport.yMin, viewport.yMax]);
 
   // Store latest draw inputs in refs so the animation loop and redraw
   // always read current values without restarting the animation.

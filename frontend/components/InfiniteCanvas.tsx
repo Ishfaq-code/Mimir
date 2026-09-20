@@ -34,6 +34,7 @@ import ProblemFocus from "./ProblemFocus";
 import TutorOverlay from "./TutorOverlay";
 import CanvasTextEditor, { type TextDraft } from "./CanvasTextEditor";
 import GraphOverlay, { type GraphInstance } from "./GraphOverlay";
+import { latexToExpr, validateExpression } from "@/lib/graph/evaluate";
 
 
 // ── helpers (module‑level, no closures) ─────────────────────────────
@@ -289,6 +290,7 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
     if (!overlay) return;
     if (graphs.some((g) => g.sourceOverlayId === overlay.id)) return;
     try {
+      validateExpression(latexToExpr(overlay.latex));
       const cam = cameraRef.current;
       const cvs = canvasRef.current;
       const viewW = (cvs?.clientWidth ?? 800) / cam.zoom;
