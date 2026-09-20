@@ -28,6 +28,7 @@ import IslandToolbar from "./IslandToolbar";
 import Icon from "./Icon";
 import TutorOverlay from "./TutorOverlay";
 import CanvasTextEditor, { type TextDraft } from "./CanvasTextEditor";
+import GraphOverlay, { type GraphInstance } from "./GraphOverlay";
 
 
 // ── helpers (module‑level, no closures) ─────────────────────────────
@@ -253,8 +254,79 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
   const [overlayCamera, setOverlayCamera] = useState<Camera>({ x: 0, y: 0, zoom: 1 });
   const [editingText, setEditingText] = useState<TextDraft | null>(null);
   const textDraftRef = useRef<TextDraft | null>(null);
+  const [graphs, setGraphs] = useState<GraphInstance[]>([]);
+  const [selectedLatexIds, setSelectedLatexIds] = useState<Set<string>>(new Set());
+  const [erasing, setErasing] = useState(false);
+  const erasingRef = useRef(false);
+  const hasSelectedLatex = selectedLatexIds.size > 0;
 
   const setTool = useCallback((t: Tool) => { toolRef.current = t; _setTool(t); }, []);
+
+  const syncSelectedLatex = useCallback(() => {
+    if (selectedRef.current.size === 0) { setSelectedLatexIds(new Set()); return; }
+    const ids = new Set<string>();
+    for (const o of Object.values(latexOverlaysRef.current)) {
+      if (o.strokeIds.some((id) => selectedRef.current.has(id))) ids.add(o.id);
+    }
+    setSelectedLatexIds(ids);
+  }, []);
+
+  const getSelectedLatexOverlay = useCallback((): LatexOverlay | null => {
+    if (selectedRef.current.size === 0) return null;
+    return Object.values(latexOverlaysRef.current).find(
+      (o) => o.strokeIds.some((id) => selectedRef.current.has(id)),
+    ) ?? null;
+  }, []);
+
+  const createGraph = useCallback(() => {
+    const overlay = getSelectedLatexOverlay();
+    if (!overlay) return;
+    if (graphs.some((g) => g.sourceOverlayId === overlay.id)) return;
+    try {
+      const cam = cameraRef.current;
+      const cvs = canvasRef.current;
+      const viewW = (cvs?.clientWidth ?? 800) / cam.zoom;
+      const viewH = (cvs?.clientHeight ?? 600) / cam.zoom;
+      const gw = Math.min(500, viewW * 0.45);
+      const gh = Math.min(400, viewH * 0.55);
+      // Place to the right of the equation, vertically centered with it
+      let gx = overlay.bounds.x + overlay.bounds.w + 40;
+      let gy = overlay.bounds.y + overlay.bounds.h / 2 - gh / 2;
+      // If it would go off the right edge of the viewport, place below instead
+      const viewRight = cam.x + viewW;
+      if (gx + gw > viewRight - 20) {
+        gx = overlay.bounds.x;
+        gy = overlay.bounds.y + overlay.bounds.h + 30;
+      }
+      // Clamp to stay within visible area
+      gx = Math.max(cam.x + 20, Math.min(gx, cam.x + viewW - gw - 20));
+      gy = Math.max(cam.y + 20, Math.min(gy, cam.y + viewH - gh - 20));
+      const graph: GraphInstance = {
+        id: `graph_${Date.now().toString(36)}`,
+        latex: overlay.latex,
+        x: gx,
+        y: gy,
+        w: gw,
+        h: gh,
+        sourceOverlayId: overlay.id,
+      };
+      setGraphs((prev) => [...prev, graph]);
+    } catch {
+      // Expression couldn't be parsed — silently ignore
+    }
+  }, [getSelectedLatexOverlay, graphs]);
+
+  const closeGraph = useCallback((graphId: string) => {
+    setGraphs((prev) => prev.filter((g) => g.id !== graphId));
+  }, []);
+
+  const moveGraph = useCallback((graphId: string, x: number, y: number) => {
+    setGraphs((prev) => prev.map((g) => g.id === graphId ? { ...g, x, y } : g));
+  }, []);
+
+  const resizeGraph = useCallback((graphId: string, w: number, h: number) => {
+    setGraphs((prev) => prev.map((g) => g.id === graphId ? { ...g, w, h } : g));
+  }, []);
 
   // ── render ──────────────────────────────────────────────────────
   const render = useCallback(() => {
@@ -262,12 +334,12 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
     const cvs = canvasRef.current;
     if (!ctx || !cvs) return;
     const dpr = window.devicePixelRatio || 1;
-    const hiddenIds = new Set(hiddenMathIdsRef.current);
+    const hiddenIds = erasingRef.current ? new Set<string>() : new Set(hiddenMathIdsRef.current);
     if (textDraftRef.current?.elementId) hiddenIds.add(textDraftRef.current.elementId);
-    const selectedLatexBounds = Object.values(latexOverlaysRef.current)
-      .filter((overlay) => overlay.strokeIds.some((id) => selectedRef.current.has(id)))
-      .map((overlay) => overlay.bounds);
-    renderScene(ctx, cvs.width / dpr, cvs.height / dpr, elementsRef.current, selectedRef.current, cameraRef.current, darkRef.current, hiddenIds, screenshotRef.current, selectedScreenshotRef.current, marqueeRef.current, selectedLatexBounds);
+    const latexStrokeIds = new Set(
+      Object.values(latexOverlaysRef.current).flatMap((o) => o.strokeIds),
+    );
+    renderScene(ctx, cvs.width / dpr, cvs.height / dpr, elementsRef.current, selectedRef.current, cameraRef.current, darkRef.current, hiddenIds, screenshotRef.current, selectedScreenshotRef.current, marqueeRef.current, [], latexStrokeIds);
   }, []);
 
   const updateStyle = useCallback((u: Partial<ElementStyle>) => {
@@ -295,12 +367,25 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
     render();
   }, [render]);
 
-  const removeLatexOverlays = useCallback((strokeIds: string[]) => {
+  // Returns surviving stroke IDs that need re-recognition
+  const removeLatexOverlays = useCallback((strokeIds: string[]): string[] => {
     const removed = new Set(strokeIds);
-    const next = Object.fromEntries(Object.entries(latexOverlaysRef.current).filter(([, overlay]) => !overlay.strokeIds.some((strokeId) => removed.has(strokeId))));
-    if (Object.keys(next).length === Object.keys(latexOverlaysRef.current).length) return;
+    const survivingStrokeIds: string[] = [];
+    const next: Record<string, LatexOverlay> = {};
+    for (const [id, overlay] of Object.entries(latexOverlaysRef.current)) {
+      if (overlay.strokeIds.some((sid) => removed.has(sid))) {
+        for (const sid of overlay.strokeIds) {
+          hiddenMathIdsRef.current.delete(sid);
+          if (!removed.has(sid)) survivingStrokeIds.push(sid);
+        }
+      } else {
+        next[id] = overlay;
+      }
+    }
+    if (Object.keys(next).length === Object.keys(latexOverlaysRef.current).length) return [];
     latexOverlaysRef.current = next;
     setLatexOverlays(next);
+    return survivingStrokeIds;
   }, []);
 
   const receiveRecognition = useCallback((event: MessageEvent<string>) => {
@@ -434,8 +519,41 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
       recognitionSessionTimerRef.current = null;
       const strokeIds = [...pendingRecognitionStrokesRef.current];
       pendingRecognitionStrokesRef.current.clear();
-      const unrecognizedStrokeIds = strokeIds.filter((strokeId) => !hiddenMathIdsRef.current.has(strokeId));
-      if (unrecognizedStrokeIds.length) sendRecognition(unrecognizedStrokeIds);
+      const newIds = strokeIds.filter((sid) => !hiddenMathIdsRef.current.has(sid));
+      if (!newIds.length) return;
+
+      // Compute bounding box of new strokes
+      const newEls = newIds.map((sid) => elementsRef.current.find((el) => el.id === sid && !el.isDeleted)).filter(Boolean) as CanvasElement[];
+      if (!newEls.length) return;
+      let nx0 = Infinity, ny0 = Infinity, nx1 = -Infinity, ny1 = -Infinity;
+      for (const el of newEls) {
+        const b = elementBounds(el);
+        nx0 = Math.min(nx0, b.x); ny0 = Math.min(ny0, b.y);
+        nx1 = Math.max(nx1, b.x + b.w); ny1 = Math.max(ny1, b.y + b.h);
+      }
+      const gap = Math.max(40, (ny1 - ny0) * 0.8);
+
+      // Find nearby overlays and absorb their strokes
+      const mergeIds = new Set(newIds);
+      const removedOverlayIds: string[] = [];
+      for (const [oid, overlay] of Object.entries(latexOverlaysRef.current)) {
+        const ob = overlay.bounds;
+        const close = !(ob.x + ob.w + gap < nx0 || ob.x - gap > nx1 || ob.y + ob.h + gap < ny0 || ob.y - gap > ny1);
+        if (close) {
+          for (const sid of overlay.strokeIds) {
+            mergeIds.add(sid);
+            hiddenMathIdsRef.current.delete(sid);
+          }
+          removedOverlayIds.push(oid);
+        }
+      }
+      if (removedOverlayIds.length) {
+        for (const oid of removedOverlayIds) delete latexOverlaysRef.current[oid];
+        latexOverlaysRef.current = { ...latexOverlaysRef.current };
+        setLatexOverlays({ ...latexOverlaysRef.current });
+      }
+
+      sendRecognition([...mergeIds]);
     }, RECOGNITION_PAUSE_MS);
   }, [latexEnabled, sendRecognition]);
 
@@ -484,19 +602,38 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
     syncScene();
   }, [syncScene]);
 
+  const reconcileOverlays = useCallback(() => {
+    const liveIds = new Set(elementsRef.current.filter((el) => !el.isDeleted).map((el) => el.id));
+    const next: Record<string, LatexOverlay> = {};
+    hiddenMathIdsRef.current.clear();
+    for (const [id, overlay] of Object.entries(latexOverlaysRef.current)) {
+      if (overlay.strokeIds.every((sid) => liveIds.has(sid))) {
+        next[id] = overlay;
+        for (const sid of overlay.strokeIds) hiddenMathIdsRef.current.add(sid);
+      }
+    }
+    latexOverlaysRef.current = next;
+    setLatexOverlays(next);
+  }, []);
+
   const undo = useCallback(() => {
     if (histIdxRef.current <= 0) return;
     histIdxRef.current--;
     elementsRef.current = cloneElements(historyRef.current[histIdxRef.current]);
     selectedRef.current.clear();
     recognitionRequestRef.current += 1;
-    hiddenMathIdsRef.current.clear();
-    latexOverlaysRef.current = {};
-    setLatexOverlays({});
-    clearRecognizedEquations();
+    reconcileOverlays();
+    // Re-recognize strokes that lost their overlay
+    if (latexEnabled) {
+      elementsRef.current
+        .filter((el): el is FreedrawElement => el.type === "freedraw" && !el.isDeleted)
+        .filter((el) => !hiddenMathIdsRef.current.has(el.id))
+        .forEach((el) => scheduleRecognition(el.id));
+    }
+    setSelectedLatexIds(new Set());
     syncScene();
     render();
-  }, [render, syncScene]);
+  }, [render, syncScene, reconcileOverlays, latexEnabled, scheduleRecognition]);
 
   const redo = useCallback(() => {
     const h = historyRef.current;
@@ -505,13 +642,17 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
     elementsRef.current = cloneElements(h[histIdxRef.current]);
     selectedRef.current.clear();
     recognitionRequestRef.current += 1;
-    hiddenMathIdsRef.current.clear();
-    latexOverlaysRef.current = {};
-    setLatexOverlays({});
-    clearRecognizedEquations();
+    reconcileOverlays();
+    if (latexEnabled) {
+      elementsRef.current
+        .filter((el): el is FreedrawElement => el.type === "freedraw" && !el.isDeleted)
+        .filter((el) => !hiddenMathIdsRef.current.has(el.id))
+        .forEach((el) => scheduleRecognition(el.id));
+    }
+    setSelectedLatexIds(new Set());
     syncScene();
     render();
-  }, [render, syncScene]);
+  }, [render, syncScene, reconcileOverlays, latexEnabled, scheduleRecognition]);
 
   // ── coordinate helper ───────────────────────────────────────────
   const screenPos = (e: { clientX: number; clientY: number }) => {
@@ -582,6 +723,7 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
         } else {
           actionRef.current = { type: "none" };
         }
+        syncSelectedLatex();
         render();
         return;
       }
@@ -592,6 +734,7 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
       }
       marqueeRef.current = { x: sp.x, y: sp.y, w: 0, h: 0 };
       actionRef.current = { type: "marquee", start: wp, additive: e.shiftKey, initialIds: [...selectedRef.current], initialScreenshot: selectedScreenshotRef.current };
+      syncSelectedLatex();
       render();
       return;
     }
@@ -658,10 +801,15 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
         break;
       }
       case "eraser": {
-        clearRecognition();
+        erasingRef.current = true; setErasing(true);
         actionRef.current = { type: "erasing" };
         const hit = hitTest(elementsRef.current, wp.x, wp.y);
-        if (hit) { hit.isDeleted = true; removeLatexOverlays([hit.id]); render(); }
+        if (hit) {
+          hit.isDeleted = true;
+          const survivors = removeLatexOverlays([hit.id]);
+          if (survivors.length) setTimeout(() => sendRecognition(survivors), 300);
+          render();
+        }
         break;
       }
     }
@@ -799,7 +947,12 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
       render();
     } else if (act.type === "erasing") {
       const hit = hitTest(elementsRef.current, wp.x, wp.y);
-      if (hit && !hit.isDeleted) { hit.isDeleted = true; removeLatexOverlays([hit.id]); render(); }
+      if (hit && !hit.isDeleted) {
+        hit.isDeleted = true;
+        const survivors = removeLatexOverlays([hit.id]);
+        if (survivors.length) setTimeout(() => sendRecognition(survivors), 300);
+        render();
+      }
     }
   };
 
@@ -837,8 +990,10 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
     }
 
     if (act.type === "moving" || act.type === "erasing" || (act.type === "resizing" && act.target !== SCREENSHOT_ID)) pushHistory();
+    if (act.type === "erasing") { erasingRef.current = false; setErasing(false); }
     if (act.type === "marquee") marqueeRef.current = null;
     actionRef.current = { type: "none" };
+    syncSelectedLatex();
     setOverlayVersion((version) => version + 1);
     render();
   };
@@ -986,8 +1141,10 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
       if ((k === "delete" || k === "backspace") && selectedRef.current.size) {
         const deletedIds = [...selectedRef.current];
         for (const el of elementsRef.current) if (selectedRef.current.has(el.id)) el.isDeleted = true;
-        removeLatexOverlays(deletedIds);
+        const survivors = removeLatexOverlays(deletedIds);
+        if (survivors.length) setTimeout(() => sendRecognition(survivors), 300);
         selectedRef.current.clear();
+        setSelectedLatexIds(new Set());
         pushHistory();
         render();
         return;
@@ -1001,7 +1158,7 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
-  }, [editingText, setTool, pushHistory, render, undo, redo, removeLatexOverlays]);
+  }, [editingText, setTool, pushHistory, render, undo, redo, removeLatexOverlays, sendRecognition]);
 
   // Theme changes update the next neutral pen color, never stored ink.
   useEffect(() => {
@@ -1078,17 +1235,66 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
         aria-label="Drawing canvas"
       />
 
-      {renderedLatex.map(({ overlay, html, style: latexStyle }) => (
+      {!erasing && renderedLatex.map(({ overlay, html, style: latexStyle }) => (
         <div
           key={overlay.id}
-          className="recognized-math"
+          className={`recognized-math ${tool === "select" ? "recognized-math-selectable" : ""} ${selectedLatexIds.has(overlay.id) ? "recognized-math-selected" : ""}`}
           style={latexStyle}
           dangerouslySetInnerHTML={{ __html: html }}
+          onPointerDown={tool === "select" ? (e) => {
+            e.stopPropagation();
+            const ids = overlay.strokeIds;
+            if (e.shiftKey) {
+              const allSelected = ids.every((id) => selectedRef.current.has(id));
+              if (allSelected) ids.forEach((id) => selectedRef.current.delete(id));
+              else ids.forEach((id) => selectedRef.current.add(id));
+            } else if (!ids.every((id) => selectedRef.current.has(id))) {
+              selectedRef.current.clear();
+              selectedScreenshotRef.current = false;
+              ids.forEach((id) => selectedRef.current.add(id));
+            }
+            syncSelectedLatex();
+            render();
+            // Deferred drag: only start moving after pointer moves > 4px
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const threshold = 4;
+            let dragging = false;
+            const onMove = (ev: PointerEvent) => {
+              if (!dragging && Math.hypot(ev.clientX - startX, ev.clientY - startY) > threshold) {
+                dragging = true;
+                const r = canvasRef.current!.getBoundingClientRect();
+                const sp = { x: startX - r.left, y: startY - r.top };
+                const wp = screenToWorld(sp.x, sp.y, cameraRef.current);
+                const offsets: Record<string, { x: number; y: number }> = {};
+                for (const el of elementsRef.current) {
+                  if (selectedRef.current.has(el.id)) offsets[el.id] = { x: el.x - wp.x, y: el.y - wp.y };
+                }
+                const overlayBounds: Record<string, { x: number; y: number; w: number; h: number }> = {};
+                for (const ov of Object.values(latexOverlaysRef.current)) {
+                  if (ov.strokeIds.some((sid) => selectedRef.current.has(sid))) overlayBounds[ov.id] = { ...ov.bounds };
+                }
+                activePointerRef.current = e.pointerId;
+                canvasRef.current?.setPointerCapture(e.pointerId);
+                actionRef.current = { type: "moving", elementIds: [...selectedRef.current], offsets, startPointer: { ...wp }, screenshotOffset: null, overlayBounds };
+              }
+            };
+            const onUp = () => {
+              window.removeEventListener("pointermove", onMove);
+              window.removeEventListener("pointerup", onUp);
+            };
+            window.addEventListener("pointermove", onMove);
+            window.addEventListener("pointerup", onUp);
+          } : undefined}
         />
       ))}
 
       {/* ── tutor layer (recognized math + tutor annotations) ─── */}
       <TutorOverlay camera={overlayCamera} />
+
+      {graphs.map((graph) => (
+        <GraphOverlay key={graph.id} graph={graph} camera={overlayCamera} dark={dark} onClose={() => closeGraph(graph.id)} onMove={moveGraph} onResize={resizeGraph} />
+      ))}
 
       <div className="canvas-topline">
         {screenshot && <button className="show-question" onClick={() => {
@@ -1103,7 +1309,7 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
       </div>
       {recognitionError && <div className="recognition-notice" role="status">Couldn’t convert that yet. Your handwriting is safe.<button onClick={retryRecognition}>Try again</button></div>}
 
-      <IslandToolbar tool={tool} onToolChange={setTool} style={style} onStyleChange={updateStyle} onUndo={undo} onRedo={redo} onVisualize={visualizeSelection} canUndo={historyState.canUndo} canRedo={historyState.canRedo}/>
+      <IslandToolbar tool={tool} onToolChange={setTool} style={style} onStyleChange={updateStyle} onUndo={undo} onRedo={redo} onVisualize={visualizeSelection} canUndo={historyState.canUndo} canRedo={historyState.canRedo} hasSelectedLatex={hasSelectedLatex} onGraph={createGraph}/>
       <div className="canvas-footer"><div className="zoom-controls"><button className="icon-button" type="button" onClick={() => zoomTo(Math.max(0.1, cameraRef.current.zoom / 1.25))} aria-label="Zoom out"><Icon name="minus" size={16}/></button><button className="zoom-percentage" type="button" onClick={() => zoomTo(1)} aria-label="Reset zoom to 100 percent">{zoom}%</button><button className="icon-button" type="button" onClick={() => zoomTo(Math.min(10, cameraRef.current.zoom * 1.25))} aria-label="Zoom in"><Icon name="plus" size={16}/></button></div></div>
 
       {editingText && <CanvasTextEditor key={editingText.key} draft={editingText} camera={overlayCamera} onCommit={finalizeText} onCancel={cancelText}/>}
