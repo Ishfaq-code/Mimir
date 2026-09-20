@@ -53,11 +53,6 @@ spacing:
   lg: "28px"
   xl: "40px"
 components:
-  button-voice:
-    backgroundColor: "{colors.accent}"
-    textColor: "{colors.on-accent}"
-    rounded: "{rounded.action}"
-    padding: "13px 16px"
   button-confirm:
     backgroundColor: "{colors.accent}"
     textColor: "{colors.on-accent}"
@@ -86,13 +81,13 @@ components:
 
 A student is at a desk after class, with daylight in the room, an iPad, and a problem they are trying to understand. The default workspace is warm and bright, with a quiet green accent. An explicit dark theme supports a different environment without changing the layout.
 
-The canvas is the main surface. A 64 px header holds only the mark, Paste screenshot, theme, and Tutor controls. The sidebar is initially closed; pasting opens a question review. No preset problem header, slogan, welcome paragraph, or prepared hint menu remains.
+The canvas is the main surface. A 64 px header holds only the mark, Paste screenshot, and theme controls. A single Mimir orb floats at the right edge of the workspace; pressing it starts and ends the voice session, and a screen-edge aura is present while the tutor is live. There is no sidebar. No preset problem header, slogan, welcome paragraph, or prepared hint menu remains.
 
 **Key Characteristics:**
 
 - Warm paper, a restrained green accent, and a quiet dot grid.
 - The pasted question remains in the same world space as the student's ink.
-- Inline OCR review and correction before the tutor receives the question.
+- A passive question chip shows the read text with tap-to-edit; edits update tutor context immediately.
 - A compact drawing toolbar, with no handles after pen strokes.
 
 Updated for screenshot import and question confirmation. Source code is authoritative; generated palette ramps in the sidecar are preview aids, not additional app colors.
@@ -101,7 +96,7 @@ Updated for screenshot import and question confirmation. Source code is authorit
 
 ### Primary
 
-Forest green (`accent`) marks active tools, question confirmation, and live voice. The pale green `accent-soft` surface supports selection. Dark mode uses a lighter green accent with dark text on solid buttons. Hover deepens the light-theme green and brightens it in dark mode.
+Forest green (`accent`) marks active tools and question actions. Live voice uses the orb’s cyan, violet, and pink palette. The pale green `accent-soft` surface supports selection. Dark mode uses a lighter green accent with dark text on solid buttons. Hover deepens the light-theme green and brightens it in dark mode.
 
 ### Neutral
 
@@ -125,19 +120,17 @@ Review headings use 21 px, corrected question text uses 15–16 px, controls use
 
 ## Elevation
 
-The header and sidebar are solid, separated by 1 px neutral rules. The floating drawing toolbar and ink popover use a restrained two-part shadow: `0 4px 18px oklch(27% 0.02 155 / .07), 0 1px 3px oklch(27% 0.02 155 / .04)`. There is no decorative glass or backdrop blur.
+The header and sidebar are solid, separated by 1 px neutral rules. The floating drawing toolbar and ink popover use a restrained two-part shadow: `0 4px 18px oklch(27% 0.02 155 / .07), 0 1px 3px oklch(27% 0.02 155 / .04)`. Workspace panels do not use decorative glass or backdrop blur; the Mimir orb is the intentional exception.
 
 **The Canvas Rule.** Elevate the controls, not the handwriting. Never frame completed pen strokes with selection boxes.
 
 ## Components
 
-### App shell and question review
+### App shell and question chip
 
-The header is 64 px at every size. The canvas initially fills the workspace. The optional tutor column is 350 px, 330 px on smaller wide screens, and 380 px above 1400 px. Below 1000 px it overlays the workspace; below 600 px it fills the workspace width. Covered canvas controls are inert. Escape or Close returns focus to Tutor.
+The header is 64 px at every size. The canvas fills the workspace below it; there is no sidebar or panel. The Mimir orb floats at the right edge, vertically centered (64 px, 52 px on phones).
 
-Pasting an image opens the review panel with a short loading status, skeleton lines, and progress. The result asks “Is this right?”, shows an editable textarea, and provides Confirm question and Read again. Empty text cannot be confirmed. A small screenshot preview in narrow layouts keeps the original visible while editing. Completion focuses the review heading rather than automatically opening the iPad keyboard.
-
-Confirmed text replaces the review form and supplies the reviewed question to the voice tutor. The floating Tutor island opens the panel and reveals the voice control even before a question is pasted. Edit returns to review and ends voice. Screenshot/read errors give a specific recovery action. No modal interrupts writing.
+Pasting an image lands it on the canvas and opens a floating question chip below the orb (300 px wide, narrower on phones). While reading, the chip shows a short status and progress. The read text appears with an Edit action; edits in the chip's textarea update tutor context immediately — there is no separate confirm step. Empty reads and failures show a specific recovery action (type the question, read again). The chip is dismissible; dismissing removes the question from tutor context while the image stays on the canvas. Replacing a screenshot reopens the chip for the new image and preserves existing ink. No modal interrupts writing.
 
 ### Canvas and drawing toolbar
 
@@ -147,13 +140,15 @@ Select, Pen, Eraser, and Text are the exposed tools. Select supports click/Shift
 
 ### Voice and recognition
 
-Voice lives in the sidebar footer, with a status label, Talk/End button, pending state, and recoverable error. The small waveform animates only while speaking. The Tutor island floats at the side of the canvas and opens the panel before or after question confirmation. Closing the sidebar retains a voice session; editing or replacing a question ends it. Confirmed text is optional context, not a prerequisite for starting voice.
+The orb follows the supplied Siri reference: a deep violet glass sphere, a fine luminous rim, overlapping cyan/violet/pink light ribbons, and a white luminous center. CSS animates the interior with state-dependent pacing; reduced motion keeps it static. It remains 64 px on desktop and 52 px on phones.
+
+Pressing the orb connects the voice session (mic permission on first press); pressing again ends it. The orb's motion encodes state — breathing while listening, a quick pulse while thinking, ripple rings while speaking — and a state-reactive aura glows around the screen edges while the session is live: cyan on the left, pink on the right, and violet along the top and bottom. A minimal status label sits under the orb, and recoverable errors (denied mic, unavailable voice) show there. The first-run "Talk to Mimir" hint fades after the first connection. Chip text is optional context, not a prerequisite for starting voice; chip edits and screenshot replacement keep the session alive because the tutor pulls context live. The `motion` library drives the outer pulse and aura animations, and `prefers-reduced-motion` swaps them for static states.
 
 The Typeset math switch remains on the canvas. Recognition failures preserve ink and expose a retry action. Recognized math and tutor annotations remain aligned with world coordinates. Provider configuration is required for voice and stroke conversion. Screenshot OCR is local and needs no provider credentials.
 
 ### Interaction and accessibility
 
-Controls have names and visible keyboard focus. Ink/width selections use pressed states; the Tutor toggle has expanded state; recognition is a labeled switch. Decorative icons are hidden from assistive technology. Motion uses brief opacity/transform transitions with ease-out. Reduced-motion preference disables animations and transitions. Physical Pencil behavior and a formal accessibility conformance target remain unverified.
+Controls have names and visible keyboard focus. Ink/width selections use pressed states; the Mimir orb has a pressed state and a live status region; recognition is a labeled switch. Decorative icons are hidden from assistive technology. Orb and aura motion uses the `motion` library with ease-out pacing. Reduced-motion preference replaces them with static states and disables CSS transitions. Physical Pencil behavior and a formal accessibility conformance target remain unverified.
 
 ## Do's and Don'ts
 
@@ -162,7 +157,7 @@ Controls have names and visible keyboard focus. Ink/width selections use pressed
 - Do keep the canvas dominant and the pen active after each stroke.
 - Do use the same green action vocabulary throughout the interface.
 - Do preserve the voice, recognition, and tutor-annotation integrations.
-- Do require confirmation before publishing screenshot text as tutor context.
+- Do show pasted question text in the chip and update tutor context from live edits.
 - Do check both themes, narrow layouts, and the actual iPad for relevant changes.
 
 ### Don't:
@@ -171,5 +166,5 @@ Controls have names and visible keyboard focus. Ink/width selections use pressed
 - Don't substitute **Typed math as the primary student input.**
 - Don't default to **Unrequested full solutions.** Reveal support when requested.
 - Don't prioritize **Teacher dashboards before the core tutor works.**
-- Don't add decorative gradients, glass panels, repeated card grids, or filler copy.
+- Don't add decorative gradients outside the orb, glass panels, repeated card grids, or filler copy.
 - Don't claim a provider or hardware test passed from frontend-only checks.

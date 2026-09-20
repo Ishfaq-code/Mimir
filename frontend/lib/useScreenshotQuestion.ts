@@ -4,16 +4,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { loadScreenshot, readScreenshot, type Screenshot } from "./screenshot";
 import { setConfirmedQuestion } from "./tutor/store";
 
-export type QuestionPhase = "empty" | "reading" | "review" | "confirmed";
+export type QuestionStatus = "idle" | "reading" | "ready" | "error";
 
+/** Pasted-screenshot question: the image lands on the canvas, local OCR feeds
+ * a floating chip, and edits update tutor context live (implicit confirm). */
 export function useScreenshotQuestion() {
   const [screenshot, setScreenshot] = useState<Screenshot | null>(null);
-  const [phase, setPhase] = useState<QuestionPhase>("empty");
-  const [text, setText] = useState("");
+  const [status, setStatus] = useState<QuestionStatus>("idle");
+  const [text, setTextState] = useState("");
   const [error, setError] = useState("");
   const [pasteError, setPasteError] = useState("");
   const [progress, setProgress] = useState(0);
-  const [voiceSession, setVoiceSession] = useState(0);
+  const [chipOpen, setChipOpen] = useState(false);
   const requestRef = useRef<AbortController | null>(null);
   const importVersion = useRef(0);
 
@@ -29,21 +31,22 @@ export function useScreenshotQuestion() {
     const request = new AbortController();
     requestRef.current = request;
     setConfirmedQuestion(null);
-    setPhase("reading");
-    setText("");
+    setStatus("reading");
+    setTextState("");
     setError("");
     setProgress(0);
     try {
       const result = await readScreenshot(source, request.signal, setProgress);
       if (request.signal.aborted) return;
       if (result.length > 12000) throw new Error("Too much text. Crop to one question and paste again.");
-      setText(result);
-      if (!result) setError("No text found. Try a clearer screenshot or enter the question below.");
+      setTextState(result);
+      setConfirmedQuestion(result || null);
+      setStatus("ready");
+      if (!result) setError("No text found. Edit to type the question.");
     } catch (failure) {
       if (request.signal.aborted) return;
       setError(failure instanceof Error ? failure.message : "Couldn’t read that image. Try again.");
-    } finally {
-      if (!request.signal.aborted) setPhase("review");
+      setStatus("error");
     }
   }, []);
 
@@ -54,31 +57,30 @@ export function useScreenshotQuestion() {
       const source = await loadScreenshot(file);
       if (version !== importVersion.current) { URL.revokeObjectURL(source.url); return false; }
       setScreenshot(source);
-      setVoiceSession(value => value + 1);
+      setChipOpen(true);
       void read(source);
       return true;
     } catch (failure) {
-      if (version === importVersion.current) setPasteError(failure instanceof Error ? failure.message : "Couldn’t paste that image.");
+      if (version === importVersion.current) setPasteError(failure instanceof Error && failure.message ? failure.message : "Couldn’t paste that image.");
       return false;
     }
   }, [read]);
 
-  const edit = () => {
-    requestRef.current?.abort();
-    setConfirmedQuestion(null);
-    setVoiceSession(value => value + 1);
-    setPhase("review");
-  };
-  const confirm = () => {
-    const question = text.trim();
-    if (!question) return false;
-    setText(question);
-    setConfirmedQuestion(question);
-    setError("");
-    setPhase("confirmed");
-    return true;
-  };
+  const setText = useCallback((value: string) => {
+    setTextState(value);
+    setConfirmedQuestion(value.trim() || null);
+  }, []);
 
-  return { screenshot, phase, text, setText, error, pasteError, setPasteError, progress, voiceSession,
-    importScreenshot, edit, confirm, retry: () => { if (screenshot) void read(screenshot); } };
+  const dismiss = useCallback(() => {
+    requestRef.current?.abort();
+    setChipOpen(false);
+    setConfirmedQuestion(null);
+  }, []);
+
+  const retry = useCallback(() => {
+    if (screenshot) { setChipOpen(true); void read(screenshot); }
+  }, [read, screenshot]);
+
+  return { screenshot, status, text, setText, error, pasteError, setPasteError, progress,
+    chipOpen, dismiss, importScreenshot, retry };
 }

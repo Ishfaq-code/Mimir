@@ -28,11 +28,11 @@ Success for the demo means the student can work through a pasted algebra questio
 | Guidance | A short question or hint connected to the relevant handwritten expression. |
 | Annotation | Circle/highlight the relevant ink; the user suggested a glow lasting about three seconds while the tutor speaks. |
 | Demonstration | Explain step by step when needed; tutor-written math should appear to draw itself. |
-| Problem source | Paste a screenshot onto the canvas. OCR it, ask the student to confirm or correct the question, and tutor only from the confirmed text. Other input methods come later. |
+| Problem source | Paste a screenshot onto the canvas. OCR it and show the read text in a small dismissible chip near the Mimir orb; edits update tutor context live. Explicit confirmation was replaced by this passive chip on 2026-09-20. Other input methods come later. |
 | Completion | Help the student reach a correct answer. |
 | Constraints | Fast hackathon iteration, reuse existing tools/APIs when useful, approximately $20 total API budget. |
 
-The screenshot flow supersedes the earlier preset algebra questions. Keep interface copy limited to necessary controls, review prompts, and actionable status/errors. Typing is allowed for OCR corrections and optional canvas textboxes. Freehand math remains the main solving interaction.
+The screenshot flow supersedes the earlier preset algebra questions. Keep interface copy limited to necessary controls, chip status, and actionable errors. Typing is allowed for chip corrections and optional canvas textboxes. Freehand math remains the main solving interaction. The tutor is invoked as **Mimir**: a single orb starts and ends the voice session, with a screen-edge aura while it is live.
 
 The original time budget was 24 hours. That was a historical constraint, not a live countdown. No sponsor requirements were specified.
 

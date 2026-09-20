@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   ConnectionState,
   ParticipantEvent,
@@ -11,7 +12,6 @@ import {
 import type { RemoteParticipant } from "livekit-client";
 import { registerCanvasRpcs } from "@/lib/livekit/rpc";
 import { tutorCanvas } from "@/lib/tutor/tutorCanvas";
-import Icon from "./Icon";
 
 type VoiceStatus =
   | "disconnected"
@@ -31,18 +31,38 @@ const STATUS_LABEL: Record<VoiceStatus, string> = {
 };
 
 // verbose diagnostics while the voice slice stabilises — open devtools
-const log = (...args: unknown[]) => console.debug("[VoiceTutor]", ...args);
+const log = (...args: unknown[]) => console.debug("[MimirOrb]", ...args);
 
-/** Voice bar: connects the browser to the LiveKit room, publishes the mic,
- * plays the tutor's audio, and registers the canvas RPC methods. */
-export default function VoiceTutor() {
+const AURA_OPACITY: Partial<Record<VoiceStatus, number[]>> = {
+  connecting: [0.35, 0.6, 0.35],
+  listening: [0.5, 0.85, 0.5],
+  thinking: [0.7, 1, 0.7],
+  speaking: [0.65, 1, 0.8, 1],
+};
+
+const AURA_PERIOD: Partial<Record<VoiceStatus, number>> = {
+  connecting: 1.4,
+  listening: 3,
+  thinking: 0.9,
+  speaking: 1.2,
+};
+
+/** Mimir orb: press to talk, press again to end. The orb's motion and a
+ * screen-edge aura encode the session state instead of opening a panel. */
+export default function MimirOrb() {
   const roomRef = useRef<Room | null>(null);
   const connectAttemptRef = useRef(0);
   const audioElsRef = useRef<HTMLMediaElement[]>([]);
   const [status, setStatus] = useState<VoiceStatus>("disconnected");
   const [error, setError] = useState<string | null>(null);
+  const [everConnected, setEverConnected] = useState(false);
+  const reduced = useReducedMotion();
 
-  const connected = status !== "disconnected" && status !== "error";
+  const connected =
+    status !== "disconnected" && status !== "error";
+  const auraActive =
+    status === "connecting" || status === "listening" ||
+    status === "thinking" || status === "speaking";
 
   const disconnect = useCallback(async () => {
     connectAttemptRef.current += 1;
@@ -104,7 +124,10 @@ export default function VoiceTutor() {
       });
       room.on(RoomEvent.ConnectionStateChanged, (state) => {
         log("connection state ->", state);
-        if (state === ConnectionState.Connected) setStatus("listening");
+        if (state === ConnectionState.Connected) {
+          setStatus("listening");
+          setEverConnected(true);
+        }
         if (state === ConnectionState.Disconnected) setStatus("disconnected");
       });
 
@@ -135,13 +158,91 @@ export default function VoiceTutor() {
     }
   }
 
+  const orbAnimate = reduced ? {} : (
+    status === "listening" ? { scale: [1, 1.05, 1] }
+    : status === "thinking" ? { scale: [1, 1.03, 1] }
+    : status === "connecting" ? { scale: [1, 1.08, 1] }
+    : {}
+  );
+  const orbTransition = reduced || !Object.keys(orbAnimate).length ? {} : {
+    duration: status === "thinking" ? 0.9 : status === "connecting" ? 1.1 : 2.4,
+    repeat: Infinity,
+    ease: "easeInOut" as const,
+  };
+
   return (
-    <div className={`voice-control voice-${status}`}>
-      {STATUS_LABEL[status] && <div className="voice-status" role="status"><span className="status-dot"/>{STATUS_LABEL[status]}</div>}
-      <button type="button" className="voice-button" onClick={() => (connected ? void disconnect() : void connect())} disabled={status === "connecting"}>
-        <Icon name={connected ? "close" : "mic"} size={20}/><span>{status === "connecting" ? "Connecting…" : connected ? "End conversation" : "Talk to Mimir"}</span><span className="voice-wave" aria-hidden="true"><i/><i/><i/><i/></span>
-      </button>
-      {error && status === "error" ? <p className="voice-error" role="alert">{error}</p> : null}
-    </div>
+    <>
+      <motion.div
+        className={`screen-aura aura-${status}`}
+        initial={{ opacity: 0 }}
+        animate={
+          auraActive
+            ? reduced || !AURA_OPACITY[status] ? { opacity: 0.7 } : { opacity: AURA_OPACITY[status] }
+            : { opacity: 0 }
+        }
+        transition={
+          auraActive && !reduced && AURA_OPACITY[status]
+            ? { duration: AURA_PERIOD[status] ?? 2, repeat: Infinity, ease: "easeInOut" as const }
+            : { duration: 0.4, ease: "easeOut" as const }
+        }
+        aria-hidden="true"
+      />
+      <div className={`mimir-orb-zone orb-${status}`}>
+        <motion.button
+          type="button"
+          className="mimir-orb"
+          onClick={() => (connected ? void disconnect() : void connect())}
+          disabled={status === "connecting"}
+          animate={orbAnimate}
+          transition={orbTransition}
+          whileHover={reduced ? undefined : { scale: connected ? 1 : 1.06 }}
+          whileTap={reduced ? undefined : { scale: 0.94 }}
+          aria-label={connected ? "End conversation with Mimir" : "Talk to Mimir"}
+          aria-pressed={connected}
+        >
+          <span className="orb-core" aria-hidden="true">
+            <span className="orb-flow">
+              <span className="orb-ribbon orb-ribbon-violet" />
+              <span className="orb-ribbon orb-ribbon-cyan" />
+              <span className="orb-ribbon orb-ribbon-pink" />
+            </span>
+            <span className="orb-light" />
+            <span className="orb-glass" />
+          </span>
+          {status === "speaking" && !reduced && (
+            <>
+              {[0, 1, 2].map((ring) => (
+                <motion.span
+                  key={ring}
+                  className="orb-ripple"
+                  initial={{ scale: 1, opacity: 0.5 }}
+                  animate={{ scale: 2, opacity: 0 }}
+                  transition={{ duration: 1.6, repeat: Infinity, delay: ring * 0.5, ease: "easeOut" }}
+                  aria-hidden="true"
+                />
+              ))}
+            </>
+          )}
+        </motion.button>
+        <AnimatePresence>
+          {!connected && !everConnected && status !== "error" && (
+            <motion.span
+              key="hint"
+              className="orb-hint"
+              initial={{ opacity: 0, x: 8 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 8 }}
+              transition={reduced ? { duration: 0 } : { duration: 0.25, ease: "easeOut" }}
+            >
+              Talk to Mimir
+            </motion.span>
+          )}
+        </AnimatePresence>
+        <div className="orb-readout" role="status" aria-live="polite">
+          {STATUS_LABEL[status] && <span className="orb-status">{STATUS_LABEL[status]}</span>}
+          {status === "error" && error && <span className="orb-error" role="alert">{error}</span>}
+        </div>
+      </div>
+    </>
   );
 }
