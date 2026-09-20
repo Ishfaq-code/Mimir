@@ -19,18 +19,30 @@ The design preview extensions live in [.impeccable/design.json](.impeccable/desi
 
 ## Run With Docker
 
-Create `backend/.env` from the documented settings in `backend/.env.example` before starting Compose. An empty local file is sufficient for the canvas and screenshot OCR. MyScript credentials enable recognition; LiveKit credentials enable token minting. Keep real credentials out of Git.
+With Docker running, set up a fresh checkout from the repository root:
 
-Start both services from the repository root:
+1. Create the two local configuration files (keep existing files if already configured):
 
-```bash
-docker compose up --build
-```
+   ```bash
+   cp backend/.env.example backend/.env
+   cp agent/.env.example agent/.env
+   ```
 
-Both Compose services hot-reload: the backend runs Uvicorn with `--reload`
-and mounts `./backend`, and the frontend runs `next dev` (Turbopack) and
-mounts `./frontend`, so source edits appear without rebuilding. Rebuild the
-image after changing backend dependencies. After changing frontend
+2. In **both files**, fill in `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` for the same LiveKit project. Set the **same `LIVEKIT_AGENT_NAME` in both files**, unique to your developer setup, for example `mimir-alex`. Teammates sharing a LiveKit project must use different names so their tutors receive the correct rooms. In `agent/.env`, also set `GOOGLE_API_KEY` for the default Gemini tutor. MyScript and OpenRouter keys in `backend/.env` are optional for handwriting conversion and custom physics visualizations. Both real `.env` files are ignored by Git; never commit credentials.
+
+3. Start frontend, backend, and the tutor worker together:
+
+   ```bash
+   docker compose up --build
+   ```
+
+Open http://localhost:3000 and press the Mimir orb. The `agent` service connects outward to LiveKit Cloud and needs no published port or separate Python installation. Stop any manually started worker using the same agent name before switching to Compose. To use only the canvas and screenshot OCR without voice credentials, run `docker compose up --build frontend backend` instead (the two local env files must still exist).
+
+All three Compose services hot-reload: the backend runs Uvicorn with `--reload`
+and mounts `./backend`, the frontend runs `next dev` (Turbopack) and
+mounts `./frontend`, and the agent runs `python main.py dev` with `./agent`
+mounted. Rebuild after changing Python dependencies with
+`docker compose up --build`. After changing frontend
 dependencies, refresh the container's installed modules:
 
 ```bash
@@ -38,6 +50,17 @@ docker compose exec frontend npm install
 ```
 
 or start clean with `docker compose down -v && docker compose up --build`.
+
+After changing either local env file, recreate the Python services so Compose
+loads the updated values:
+
+```bash
+docker compose up -d --force-recreate backend agent
+```
+
+If voice does not connect, check `docker compose logs --tail=100 agent backend`
+and verify the matching agent names and credentials. `docker compose config --quiet`
+validates the Compose setup without printing resolved credentials.
 
 The services are available at:
 
@@ -70,9 +93,9 @@ npm run dev
 
 The backend may keep running in Docker. The frontend uses `/token` for voice, `/visualize` for word-problem visualizations, and `/ws/latex` for the optional Typeset math switch. `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_TOKEN_URL`, and `NEXT_PUBLIC_RECOGNIZER_WS_URL` override their endpoints. Defaults target the current browser hostname on port 8000. `NEXT_PUBLIC_RECOGNITION_PAUSE_MS` controls how long completed strokes are grouped before recognition and defaults to 2000 ms. The backend currently allows HTTP CORS from `localhost:3000`; configure the origin when serving the frontend on another address.
 
-For voice, also install `agent/requirements.txt`, configure `agent/.env` using `agent/.env.example`, and run `python main.py dev` from `agent/`. The Python LiveKit worker is a separate process, not a Compose service. Press the Mimir orb to start a voice session with or without a pasted question; the chip's text is added to the tutor context when available and edits update it live. Replacing a screenshot keeps the session alive.
+For voice, leave the Compose `agent` service running. To run the worker outside Docker instead, first use `docker compose stop agent`, then install `agent/requirements.txt` in a Python 3.12 virtual environment, configure `agent/.env` using `agent/.env.example`, and run `python main.py dev` from `agent/`. Press the Mimir orb to start a voice session with or without a pasted question; the chip's text is added to the tutor context when available and edits update it live. Replacing a screenshot keeps the session alive.
 
-The backend and worker must use the same `LIVEKIT_AGENT_NAME` (default `mimir-tutor`). Each voice token explicitly requests that worker. When teammates share a LiveKit project, use a different name for each developer's backend/worker pair so requests reach the intended checkout. Restart both processes after changing this setting; restarting only Next.js does not restart the Python worker. One agent process stays warm between connections. Startup waits for the tutor to be ready, retries once in a fresh room after failure, and can be cancelled by pressing the orb again.
+The backend and worker must use the same `LIVEKIT_AGENT_NAME` (default `mimir-tutor`). Each voice token explicitly requests that worker. When teammates share a LiveKit project, use a different name for each developer's backend/worker pair so requests reach the intended checkout. Recreate both Compose services after changing this setting (or restart both processes when running outside Docker); restarting only Next.js does not restart the Python worker. One agent process stays warm between connections. Startup waits for the tutor to be ready, retries once in a fresh room after failure, and can be cancelled by pressing the orb again.
 
 You can ask Mimir to check while still writing. The request waits until the pen has been up for one second; more writing resets that pause. Changes during checking trigger a fresh snapshot automatically. Stop, Pause, a new question, or ending the conversation cancels the pending check. Tutor steps animate as handwritten SVG strokes below the working column, avoiding existing content. Calm motion skips the drawing animation. Pen inactivity is a timing signal, not proof that a solution is complete.
 
@@ -116,7 +139,7 @@ GEMINI_LIVE_MODEL=gemini-3.8-live
 GEMINI_VOICE=Puck
 ```
 
-Install `agent/requirements.txt`, keep the existing LiveKit credentials and matching `LIVEKIT_AGENT_NAME`, then restart the Python worker and start a fresh orb conversation. Google credentials stay on the server. Standard Gemini Live does not accept a thinking configuration; Extended Thinking is a different integration and is not selected here.
+Compose installs `agent/requirements.txt` when building the agent image. Keep the existing LiveKit credentials and matching `LIVEKIT_AGENT_NAME`, recreate the `agent` service after configuration changes, and start a fresh orb conversation. For a manual worker, install the requirements and restart its process instead. Google credentials stay on the server. Standard Gemini Live does not accept a thinking configuration; Extended Thinking is a different integration and is not selected here.
 
 Changed, settled canvas frames reach the session silently, at most once per second. The existing one-second pen-up gate prevents partial strokes from being reviewed. An unchanged frame is reused, and a new frame's state and image are fetched concurrently and checked against the same board revision. The confirmed question and last interpreted problem remain available when panning below the question.
 
