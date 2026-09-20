@@ -154,4 +154,9 @@ button { transition: background-color 160ms ease-out, color 160ms ease-out, opac
 .text-editor-actions button { min-height:32px;padding:4px 10px;border:0;border-radius:4px;background:transparent;color:var(--muted);font-size:12px; }
 .text-editor-actions button:last-child { background:var(--accent-soft);color:var(--accent); }
 .text-editor-actions button:hover { background:var(--surface-soft);color:var(--ink); }
+.visualize-backdrop { position:absolute;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding:24px;background:oklch(20% .02 155 / .28); }
+.visualize-modal { width:min(520px,100%);max-height:calc(100% - 48px);overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:var(--elevated); }
+.visualize-heading { display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--line); }
+.visualize-heading h2 { margin:0;font-size:16px;font-weight:600; }
+.visualize-text { margin:0;padding:22px 18px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:16px;line-height:1.75; }
 @media(max-width:999px) { .question-preview { display:block;width:100%;height:auto;max-height:180px;object-fit:contain;object-position:left top;margin:0 0 20px;border-radius:4px; } }

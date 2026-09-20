@@ -18,7 +18,7 @@ Repository: `Ishfaq-code/Mimir`. Local root: `/Users/stevin/Documents/Projects/M
 | Review | Editable plain text, empty confirmation disabled, retry/manual fallback, cancellation and stale-result guards. Normal text paste remains available inside the correction field. |
 | Voice context | `CanvasState.question` holds only confirmed text, separate from recognized student equations. Editing/replacing clears it and unmounts/disconnects voice. Closing the sidebar preserves voice. |
 | Canvas selection | Select (V/1) supports click/Shift-click, marquee selection, multi-element movement, and corner resizing. Pasted screenshots can also be selected, moved, and resized. |
-| Textboxes | Select Text (T), tap to place or edit. Done/Enter saves, Shift+Enter adds a line, Escape/Cancel discards. Uses ink color; undo/redo and eraser apply. Text remains visual canvas content, separate from question confirmation and stroke recognition. |
+| Textboxes | Select Text (T), tap to place or edit. Done/Enter saves, Shift+Enter adds a line, Escape/Cancel discards. Uses ink color; undo/redo and eraser apply. Text remains visual canvas content, separate from question confirmation and stroke recognition. Selecting a textbox and choosing Visualize opens its text in a modal. |
 | Handwriting | Existing custom Canvas 2D engine. Pen stays selected; no stroke selection handles. Eight colors including white, widths 1/2/4, undo/redo. |
 | Navigation | Wheel pan, modifier-wheel zoom, Space/middle-button drag, finger pan, zoom controls. |
 | MyScript | Optional Typeset math switch recognizes freehand strokes via backend `/ws/latex`. Separate from screenshot OCR. |
@@ -27,7 +27,7 @@ Repository: `Ishfaq-code/Mimir`. Local root: `/Users/stevin/Documents/Projects/M
 | Tutor annotations | Configured LiveKit/OpenAI agent can read canvas context and write LaTeX through RPC. |
 | Error states | Recognition failures preserve ink and expose retry. Voice failures show a recoverable error. |
 | Persistence | In-memory visit only. Reload clears image, reviewed question, and ink. |
-| Absent | Accounts, teacher reports, durable storage, other import methods, generated visualizations, precise highlighting, animated demonstrations, reliable proactive error detection. |
+| Absent | Accounts, teacher reports, durable storage, other import methods, generated visualizations beyond displaying selected textbox text, precise highlighting, animated demonstrations, reliable proactive error detection. |
 
 ## Ownership and data flow
 

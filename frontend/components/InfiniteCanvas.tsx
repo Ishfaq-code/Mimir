@@ -250,6 +250,7 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
   const [overlayVersion, setOverlayVersion] = useState(0);
   const [overlayCamera, setOverlayCamera] = useState<Camera>({ x: 0, y: 0, zoom: 1 });
   const [editingText, setEditingText] = useState<TextDraft | null>(null);
+  const [visualizedText, setVisualizedText] = useState<string | null>(null);
   const textDraftRef = useRef<TextDraft | null>(null);
 
   const setTool = useCallback((t: Tool) => { toolRef.current = t; _setTool(t); }, []);
@@ -884,6 +885,22 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
     render();
   }, [pushHistory, render]);
 
+  const visualizeSelection = useCallback(() => {
+    const selectedText = elementsRef.current.find((element): element is TextElement =>
+      selectedRef.current.has(element.id) && element.type === "text" && !element.isDeleted,
+    );
+    if (selectedText) setVisualizedText(selectedText.text);
+  }, []);
+
+  useEffect(() => {
+    if (visualizedText === null) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setVisualizedText(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [visualizedText]);
+
   // ── effects ─────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -1092,10 +1109,16 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
       </div>
       {recognitionError && <div className="recognition-notice" role="status">Couldn’t convert that yet. Your handwriting is safe.<button onClick={retryRecognition}>Try again</button></div>}
 
-      <IslandToolbar tool={tool} onToolChange={setTool} style={style} onStyleChange={updateStyle} onUndo={undo} onRedo={redo} canUndo={historyState.canUndo} canRedo={historyState.canRedo}/>
+      <IslandToolbar tool={tool} onToolChange={setTool} style={style} onStyleChange={updateStyle} onUndo={undo} onRedo={redo} onVisualize={visualizeSelection} canUndo={historyState.canUndo} canRedo={historyState.canRedo}/>
       <div className="canvas-footer"><div className="zoom-controls"><button className="icon-button" type="button" onClick={() => zoomTo(Math.max(0.1, cameraRef.current.zoom / 1.25))} aria-label="Zoom out"><Icon name="minus" size={16}/></button><button className="zoom-percentage" type="button" onClick={() => zoomTo(1)} aria-label="Reset zoom to 100 percent">{zoom}%</button><button className="icon-button" type="button" onClick={() => zoomTo(Math.min(10, cameraRef.current.zoom * 1.25))} aria-label="Zoom in"><Icon name="plus" size={16}/></button></div></div>
 
       {editingText && <CanvasTextEditor key={editingText.key} draft={editingText} camera={overlayCamera} onCommit={finalizeText} onCancel={cancelText}/>}
+      {visualizedText !== null && <div className="visualize-backdrop" role="presentation" onMouseDown={() => setVisualizedText(null)}>
+        <section className="visualize-modal" role="dialog" aria-modal="true" aria-labelledby="visualize-title" onMouseDown={event => event.stopPropagation()}>
+          <div className="visualize-heading"><h2 id="visualize-title">Visualize</h2><button className="icon-button" type="button" onClick={() => setVisualizedText(null)} aria-label="Close visualization"><Icon name="close" size={18}/></button></div>
+          <p className="visualize-text">{visualizedText}</p>
+        </section>
+      </div>}
 
     </div>
   );
