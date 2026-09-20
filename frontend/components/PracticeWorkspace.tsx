@@ -6,6 +6,7 @@ import { useScreenshotQuestion } from "@/lib/useScreenshotQuestion";
 import InfiniteCanvas from "./InfiniteCanvas";
 import VoiceTutor from "./VoiceTutor";
 import Icon, { MimirMark } from "./Icon";
+import VisualizationResult, { type VisualizationData } from "./VisualizationResult";
 
 const wideQuery = "(min-width: 1000px)";
 function subscribeViewport(callback: () => void) {
@@ -15,17 +16,90 @@ function subscribeViewport(callback: () => void) {
 }
 const getWideViewport = () => window.matchMedia(wideQuery).matches;
 const getServerViewport = () => true;
+type VisualizationStatus = "loading" | "success" | "error";
 
 export default function PracticeWorkspace() {
   const [dark, setDark] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [pasting, setPasting] = useState(false);
+  const [visualizationOpen, setVisualizationOpen] = useState(false);
+  const [visualizationProblem, setVisualizationProblem] = useState("");
+  const [visualizationStatus, setVisualizationStatus] = useState<VisualizationStatus>("loading");
+  const [visualization, setVisualization] = useState<VisualizationData | null>(null);
+  const [visualizationError, setVisualizationError] = useState("");
+  const [visualizationRevision, setVisualizationRevision] = useState(0);
+  const visualizationAbortRef = useRef<AbortController | null>(null);
+  const visualizationRequestIdRef = useRef(0);
   const question = useScreenshotQuestion();
   const { importScreenshot, setPasteError } = question;
   const wide = useSyncExternalStore(subscribeViewport, getWideViewport, getServerViewport);
   const tutorToggleRef = useRef<HTMLButtonElement>(null);
   const reviewHeadingRef = useRef<HTMLHeadingElement>(null);
   const closePanel = () => { setPanelOpen(false); tutorToggleRef.current?.focus(); };
+
+  const requestVisualization = useCallback(async (problem: string) => {
+    visualizationAbortRef.current?.abort();
+    const requestId = ++visualizationRequestIdRef.current;
+    setVisualizationRevision(value => value + 1);
+    const controller = new AbortController();
+    visualizationAbortRef.current = controller;
+    setVisualizationStatus("loading");
+    setVisualization(null);
+    setVisualizationError("");
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? process.env.NEXT_PUBLIC_TOKEN_URL ?? `${window.location.protocol}//${window.location.hostname}:8000`;
+      const response = await fetch(`${apiUrl}/visualize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ problem, topic: "physics" }),
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      const body = await response.json() as VisualizationData | { detail?: string };
+      if (!response.ok) throw new Error("detail" in body && body.detail ? body.detail : "The visualization could not be generated.");
+      if (controller.signal.aborted || requestId !== visualizationRequestIdRef.current) return;
+      setVisualization(body as VisualizationData);
+      setVisualizationStatus("success");
+    } catch (error) {
+      if (controller.signal.aborted || requestId !== visualizationRequestIdRef.current) return;
+      setVisualizationStatus("error");
+      setVisualizationError(error instanceof Error ? error.message : "The visualization could not be generated.");
+    }
+  }, []);
+
+  const openVisualization = useCallback((problem: string) => {
+    visualizationAbortRef.current?.abort();
+    setVisualizationProblem(problem);
+    setVisualizationStatus("loading");
+    setVisualization(null);
+    setVisualizationError("");
+    setVisualizationOpen(true);
+    void requestVisualization(problem);
+  }, [requestVisualization]);
+
+  const closeVisualization = useCallback(() => {
+    visualizationAbortRef.current?.abort();
+    visualizationRequestIdRef.current += 1;
+    visualizationAbortRef.current = null;
+    setVisualizationOpen(false);
+    setVisualizationProblem("");
+    setVisualization(null);
+    setVisualizationError("");
+  }, []);
+
+  useEffect(() => {
+    if (!visualizationOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeVisualization();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [closeVisualization, visualizationOpen]);
+
+  useEffect(() => () => {
+    visualizationRequestIdRef.current += 1;
+    visualizationAbortRef.current?.abort();
+  }, []);
 
   const acceptImage = useCallback(async (file: Blob) => {
     if (await importScreenshot(file)) setPanelOpen(true);
@@ -88,7 +162,7 @@ export default function PracticeWorkspace() {
           <Icon name="tutor" size={18}/><span>Tutor</span>{question.phase === "review" && <span className="review-dot"/>}
         </button>
         <main className="workspace-main" aria-label="Math workspace" inert={panelOpen && !wide}>
-          <InfiniteCanvas dark={dark} screenshot={question.screenshot} />
+           <InfiniteCanvas dark={dark} screenshot={question.screenshot} confirmedQuestion={question.phase === "confirmed" ? question.text : null} onVisualizeRequest={openVisualization} />
           {question.pasteError && <div className="paste-notice" role="alert"><span>{question.pasteError}</span><button className="icon-button" aria-label="Dismiss paste message" onClick={() => setPasteError("")}><Icon name="close" size={16}/></button></div>}
         </main>
         <aside className="tutor-panel" id="tutor-panel" aria-label="Question and tutor" onKeyDown={event => { if (event.key === "Escape") closePanel(); }}>
@@ -109,6 +183,17 @@ export default function PracticeWorkspace() {
           <footer className="tutor-footer"><VoiceTutor key={`${question.screenshot?.id ?? "none"}-${question.phase}`}/></footer>
         </aside>
       </div>
+      {visualizationOpen && <div className="visualize-backdrop" role="presentation" onMouseDown={closeVisualization}>
+        <section className="visualize-modal" role="dialog" aria-modal="true" aria-labelledby="visualize-title" onMouseDown={event => event.stopPropagation()}>
+          <div className="visualize-heading"><h2 id="visualize-title">Visualize word problem</h2><button className="icon-button" type="button" onClick={closeVisualization} aria-label="Close visualization"><Icon name="close" size={18}/></button></div>
+          <div className="visualize-body">
+            <div className="visualize-problem"><span className="eyebrow">WORD PROBLEM</span><p>{visualizationProblem}</p></div>
+            {visualizationStatus === "loading" && <div className="visualize-loading" role="status"><span className="review-dot"/>Building the visualization…</div>}
+            {visualizationStatus === "error" && <div className="visualize-error" role="alert"><p>{visualizationError}</p><button className="primary-button" type="button" onClick={() => void requestVisualization(visualizationProblem)}>Try again</button></div>}
+            {visualizationStatus === "success" && visualization && <VisualizationResult key={visualizationRevision} data={visualization}/>}
+          </div>
+        </section>
+      </div>}
     </div>
   );
 }

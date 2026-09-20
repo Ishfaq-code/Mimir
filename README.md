@@ -1,10 +1,10 @@
 # Mimir
 
-Mimir is an iPad-oriented AI math tutor project: students write on an infinite canvas and the planned tutor guides them through live conversation and annotations.
+Mimir is an iPad-oriented AI math tutor project: students write on an infinite canvas and the planned tutor guides them through live conversation, annotations, and interactive word-problem visualizations.
 
 **Current state:** paste a screenshot onto the canvas with ⌘V / Ctrl+V or the Paste screenshot button. The app reads it locally, asks “Is this right?”, and lets the student edit and confirm the question. Only confirmed text becomes tutor context. The original image stays on the canvas with Pen/Eraser/Text, undo/redo, and light/dark themes. There are no preset questions or prepared hints.
 
-Screenshot OCR uses Tesseract.js in a browser worker and needs no API key. It is intended for printed English and simple algebra. Fractions, exponents, diagrams, and handwriting can need manual correction. Nothing is uploaded for OCR. Confirmed text is shared with the voice tutor only when a voice session is started. MyScript handwriting conversion and LiveKit/OpenAI voice still require their own provider configuration. Reload clears the visit.
+Screenshot OCR uses Tesseract.js in a browser worker and needs no API key. It is intended for printed English and simple algebra. Fractions, exponents, diagrams, and handwriting can need manual correction. Nothing is uploaded for OCR. Confirmed text is shared with the voice tutor only when a voice session is started. MyScript handwriting conversion and LiveKit/OpenAI voice still require their own provider configuration. Selecting a canvas textbox and choosing Visualize uses OpenRouter Ling 3.0 Flash VL to extract physics inputs, then the backend deterministically calculates and renders the discrete animation. Reload clears the visit.
 
 ## Project references
 
@@ -66,7 +66,7 @@ npm ci
 npm run dev
 ```
 
-The backend may keep running in Docker. The frontend uses `/token` for voice and `/ws/latex` for the optional Typeset math switch. `NEXT_PUBLIC_TOKEN_URL` and `NEXT_PUBLIC_RECOGNIZER_WS_URL` override their endpoints. Defaults target the current browser hostname on port 8000. `NEXT_PUBLIC_RECOGNITION_PAUSE_MS` controls how long completed strokes are grouped before recognition and defaults to 2000 ms. The backend currently allows HTTP CORS from `localhost:3000`; configure the origin when serving the frontend on another address.
+The backend may keep running in Docker. The frontend uses `/token` for voice, `/visualize` for word-problem visualizations, and `/ws/latex` for the optional Typeset math switch. `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_TOKEN_URL`, and `NEXT_PUBLIC_RECOGNIZER_WS_URL` override their endpoints. Defaults target the current browser hostname on port 8000. `NEXT_PUBLIC_RECOGNITION_PAUSE_MS` controls how long completed strokes are grouped before recognition and defaults to 2000 ms. The backend currently allows HTTP CORS from `localhost:3000`; configure the origin when serving the frontend on another address.
 
 For voice, also install `agent/requirements.txt`, configure `agent/.env` using `agent/.env.example`, and run `python main.py dev` from `agent/`. The Python LiveKit worker is a separate process, not a Compose service. Open the floating Tutor island to start a voice session with or without a pasted question; confirmed screenshot text is added to the tutor context when available. Editing or replacing a question ends the old voice session; closing the panel retains the session.
 

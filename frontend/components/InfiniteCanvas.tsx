@@ -204,9 +204,11 @@ const RECOGNITION_PAUSE_MS = Number(process.env.NEXT_PUBLIC_RECOGNITION_PAUSE_MS
 interface InfiniteCanvasProps {
   dark: boolean;
   screenshot: Screenshot | null;
+  confirmedQuestion: string | null;
+  onVisualizeRequest: (problem: string) => void;
 }
 
-export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps) {
+export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, onVisualizeRequest }: InfiniteCanvasProps) {
   // ── refs ────────────────────────────────────────────────────────
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -250,7 +252,6 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
   const [overlayVersion, setOverlayVersion] = useState(0);
   const [overlayCamera, setOverlayCamera] = useState<Camera>({ x: 0, y: 0, zoom: 1 });
   const [editingText, setEditingText] = useState<TextDraft | null>(null);
-  const [visualizedText, setVisualizedText] = useState<string | null>(null);
   const textDraftRef = useRef<TextDraft | null>(null);
 
   const setTool = useCallback((t: Tool) => { toolRef.current = t; _setTool(t); }, []);
@@ -889,17 +890,9 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
     const selectedText = elementsRef.current.find((element): element is TextElement =>
       selectedRef.current.has(element.id) && element.type === "text" && !element.isDeleted,
     );
-    if (selectedText) setVisualizedText(selectedText.text);
-  }, []);
-
-  useEffect(() => {
-    if (visualizedText === null) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setVisualizedText(null);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [visualizedText]);
+    const problem = selectedText?.text.trim() || confirmedQuestion?.trim();
+    if (problem) onVisualizeRequest(problem);
+  }, [confirmedQuestion, onVisualizeRequest]);
 
   // ── effects ─────────────────────────────────────────────────────
 
@@ -922,6 +915,7 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
       height: image.naturalHeight * scale / camera.zoom,
     };
     selectedScreenshotRef.current = false;
+    selectedRef.current.clear();
     marqueeRef.current = null;
     const recognitionReset = window.setTimeout(clearRecognition, 0);
     render();
@@ -1113,13 +1107,6 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
       <div className="canvas-footer"><div className="zoom-controls"><button className="icon-button" type="button" onClick={() => zoomTo(Math.max(0.1, cameraRef.current.zoom / 1.25))} aria-label="Zoom out"><Icon name="minus" size={16}/></button><button className="zoom-percentage" type="button" onClick={() => zoomTo(1)} aria-label="Reset zoom to 100 percent">{zoom}%</button><button className="icon-button" type="button" onClick={() => zoomTo(Math.min(10, cameraRef.current.zoom * 1.25))} aria-label="Zoom in"><Icon name="plus" size={16}/></button></div></div>
 
       {editingText && <CanvasTextEditor key={editingText.key} draft={editingText} camera={overlayCamera} onCommit={finalizeText} onCancel={cancelText}/>}
-      {visualizedText !== null && <div className="visualize-backdrop" role="presentation" onMouseDown={() => setVisualizedText(null)}>
-        <section className="visualize-modal" role="dialog" aria-modal="true" aria-labelledby="visualize-title" onMouseDown={event => event.stopPropagation()}>
-          <div className="visualize-heading"><h2 id="visualize-title">Visualize</h2><button className="icon-button" type="button" onClick={() => setVisualizedText(null)} aria-label="Close visualization"><Icon name="close" size={18}/></button></div>
-          <p className="visualize-text">{visualizedText}</p>
-        </section>
-      </div>}
-
     </div>
   );
 }

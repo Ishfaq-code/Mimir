@@ -18,7 +18,7 @@ Repository: `Ishfaq-code/Mimir`. Local root: `/Users/stevin/Documents/Projects/M
 | Review | Editable plain text, empty confirmation disabled, retry/manual fallback, cancellation and stale-result guards. Normal text paste remains available inside the correction field. |
 | Voice context | `CanvasState.question` holds only confirmed text, separate from recognized student equations. Editing/replacing clears it and unmounts/disconnects voice. Closing the sidebar preserves voice. |
 | Canvas selection | Select (V/1) supports click/Shift-click, marquee selection, multi-element movement, and corner resizing. Pasted screenshots can also be selected, moved, and resized. |
-| Textboxes | Select Text (T), tap to place or edit. Done/Enter saves, Shift+Enter adds a line, Escape/Cancel discards. Uses ink color; undo/redo and eraser apply. Text remains visual canvas content, separate from question confirmation and stroke recognition. Selecting a textbox and choosing Visualize opens its text in a modal. |
+| Textboxes | Select Text (T), tap to place or edit. Done/Enter saves, Shift+Enter adds a line, Escape/Cancel discards. Uses ink color; undo/redo and eraser apply. Text remains visual canvas content, separate from question confirmation and stroke recognition. Selecting a textbox and choosing Visualize immediately requests a Physics word-problem visualization. |
 | Handwriting | Existing custom Canvas 2D engine. Pen stays selected; no stroke selection handles. Eight colors including white, widths 1/2/4, undo/redo. |
 | Navigation | Wheel pan, modifier-wheel zoom, Space/middle-button drag, finger pan, zoom controls. |
 | MyScript | Optional Typeset math switch recognizes freehand strokes via backend `/ws/latex`. Separate from screenshot OCR. |
@@ -27,7 +27,8 @@ Repository: `Ishfaq-code/Mimir`. Local root: `/Users/stevin/Documents/Projects/M
 | Tutor annotations | Configured LiveKit/OpenAI agent can read canvas context and write LaTeX through RPC. |
 | Error states | Recognition failures preserve ink and expose retry. Voice failures show a recoverable error. |
 | Persistence | In-memory visit only. Reload clears image, reviewed question, and ink. |
-| Absent | Accounts, teacher reports, durable storage, other import methods, generated visualizations beyond displaying selected textbox text, precise highlighting, animated demonstrations, reliable proactive error detection. |
+| Visualization | Selected textbox text is sent with the fixed `physics` topic to `POST /visualize`; OpenRouter Ling 3.0 Flash VL extracts motion inputs, then the backend deterministically solves constant-acceleration motion and returns keyframes with complete per-frame variable snapshots, rendered with a timeline slider, live variable readout, and Next control. |
+| Absent | Accounts, teacher reports, durable storage, other import methods, generated visualizations beyond the Physics keyframe flow, precise highlighting, animated demonstrations, reliable proactive error detection. |
 
 ## Ownership and data flow
 
@@ -53,7 +54,8 @@ flowchart TD
 | `frontend/lib/useScreenshotQuestion.ts` | Screenshot lifecycle, asynchronous import versions, abortable OCR, editable text, confirmation and tutor context. |
 | `frontend/lib/screenshot.ts` | File validation/decode, Tesseract lazy import, OCR progress/timeout/cancellation, worker cleanup. |
 | `frontend/scripts/prepare-ocr.mjs` | Copies installed worker, core variants, language data, and licenses to ignored `public/ocr/` before dev/build. |
-| `frontend/components/InfiniteCanvas.tsx` | Existing stroke capture/history/recognition, camera, reference image placement, canvas tools. |
+| `frontend/components/InfiniteCanvas.tsx` | Existing stroke capture/history/recognition, camera, reference image placement, canvas tools, and selected-text visualization requests. |
+| `frontend/components/VisualizationResult.tsx` | Safe SVG renderer for validated visualization keyframes, timeline slider, and Previous/Next controls. |
 | `frontend/lib/canvas/renderer.ts` | World-space image followed by ink painting. Existing smoothing is unchanged. |
 | `frontend/components/IslandToolbar.tsx` | Pen/Eraser/Text, colors/width, undo/redo. |
 | `frontend/components/CanvasTextEditor.tsx` | Positioned textbox editor, multiline input, outside-click save, cancellation and focus handling. |
@@ -61,7 +63,7 @@ flowchart TD
 | `frontend/lib/tutor/store.ts`, `types.ts` | Separate confirmed question, recognized equations, tutor annotations, revisions/subscriptions. |
 | `frontend/components/TutorOverlay.tsx` | KaTeX annotations aligned with camera. |
 | `frontend/app/globals.css` | Warm neutral / green tokens, dark theme, controls, review panel, responsive and reduced-motion rules. |
-| `backend/main.py` | Health, token minting, MyScript WebSocket recognition and CORS. |
+| `backend/main.py` | Health, token minting, MyScript WebSocket recognition, OpenRouter visualization generation, and CORS. |
 | `agent/prompts.py` | Tutor reads confirmed question as problem data, distinct from student work and role instructions. |
 
 `components/Canvas.tsx`, `LatexPreview.tsx`, and `lib/recognizer.ts` are disconnected scaffolding. There is no Excalidraw SDK. `ChatPanel.tsx` and `lib/problems.ts` were removed with the preset flow. `spec.md` includes planned agent tools that do not all exist yet.
@@ -89,7 +91,7 @@ See [README.md](../README.md). Next.js 16.3.5 / React 19 / TypeScript, Tesseract
 
 Screenshot OCR works without provider keys. Its lazy-loaded assets come from `/ocr/` on this app, generated before build/dev and excluded from Git, lint, and Docker input context. Docker's builder regenerates them and its runner serves them from public.
 
-`backend/.env` is an ignored comment-only local file, sufficient to start Compose. Configure MyScript/LiveKit there and OpenAI/LiveKit in `agent/.env`; the agent runs separately. No provider credentials were supplied during these changes. Defaults use the browser hostname on backend port 8000. Backend CORS currently allows only `http://localhost:3000`; configure origins deliberately for a tunnel/deployment. iPad Clipboard API and microphone access need a secure supported origin; localhost on desktop does not verify iPad HTTPS readiness.
+`backend/.env` is ignored. Configure MyScript, LiveKit, and the OpenRouter visualization key there; configure OpenAI/LiveKit separately in `agent/.env` for voice. The agent runs separately. Defaults use the browser hostname on backend port 8000. Backend CORS currently allows only `http://localhost:3000`; configure origins deliberately for a tunnel/deployment. iPad Clipboard API and microphone access need a secure supported origin; localhost on desktop does not verify iPad HTTPS readiness.
 
 ## Verification
 
@@ -97,7 +99,7 @@ Frontend overrides: `NEXT_PUBLIC_TOKEN_URL`, `NEXT_PUBLIC_RECOGNIZER_WS_URL`, an
 
 The frontend revamp covered pen/eraser, history, colors, themes, recognition/voice failure states, responsive layouts, screenshot OCR review, and the Text tool. Browser checks exercised a clipboard PNG (`Solve for x. 2(x + 3) = 14`), correction/confirmation, empty submission blocking, cancellation, repeat paste, blank-image fallback, ink preservation, and multiline text editing. A store contract check verified only confirmed text becomes question context and clearing it removes stale work/annotations.
 
-ESLint, TypeScript, and the Docker production build passed. Production OCR was also verified through the Paste screenshot button against real PNG clipboard data, with no browser runtime errors. Screenshot import passed desktop browser checks. The browser viewport override did not change the measured viewport during this run, so mobile layout and physical iPad clipboard/Pencil behavior still need a device check. Do not claim a hardware pass. No real LiveKit/OpenAI/MyScript provider roundtrip was completed.
+ESLint, TypeScript, and the Docker production build passed. Production OCR was also verified through the Paste screenshot button against real PNG clipboard data, with no browser runtime errors. Screenshot import passed desktop browser checks. The browser viewport override did not change the measured viewport during this run, so mobile layout and physical iPad clipboard/Pencil behavior still need a device check. Do not claim a hardware pass. No real LiveKit/OpenAI/MyScript/OpenRouter provider roundtrip was completed.
 
 The Text tool was checked by creating multiline text, reopening it, saving corrections, canceling, undoing/redoing edits, clicking outside to create another box, switching to Pen, and erasing a textbox. Lint, TypeScript, and the production build passed. Physical iPad keyboard behavior remains unverified.
 
