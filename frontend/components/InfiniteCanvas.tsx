@@ -155,10 +155,9 @@ const RECOGNITION_PAUSE_MS = Number(process.env.NEXT_PUBLIC_RECOGNITION_PAUSE_MS
 interface InfiniteCanvasProps {
   dark: boolean;
   screenshot: Screenshot | null;
-  onPasteScreenshot: () => void;
 }
 
-export default function InfiniteCanvas({ dark, screenshot, onPasteScreenshot }: InfiniteCanvasProps) {
+export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps) {
   // ── refs ────────────────────────────────────────────────────────
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -191,7 +190,6 @@ export default function InfiniteCanvas({ dark, screenshot, onPasteScreenshot }: 
   const [tool, _setTool] = useState<Tool>("freedraw");
   const [style, _setStyle] = useState<ElementStyle>({ ...DEFAULT_STYLE, strokeColor: dark ? "#ffffff" : DEFAULT_STYLE.strokeColor });
   const [zoom, setZoomUI] = useState(100);
-  const [hasInk, setHasInk] = useState(false);
   const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
   const [recognitionError, setRecognitionError] = useState(false);
   const [latexEnabled, setLatexEnabled] = useState(false);
@@ -406,7 +404,6 @@ export default function InfiniteCanvas({ dark, screenshot, onPasteScreenshot }: 
   }, [latexEnabled, scheduleRecognition]);
 
   const syncScene = useCallback(() => {
-    setHasInk(elementsRef.current.some(el => !el.isDeleted));
     setHistoryState({ canUndo: histIdxRef.current > 0, canRedo: histIdxRef.current < historyRef.current.length - 1 });
   }, []);
 
@@ -855,8 +852,6 @@ export default function InfiniteCanvas({ dark, screenshot, onPasteScreenshot }: 
 
       {/* ── tutor layer (recognized math + tutor annotations) ─── */}
       <TutorOverlay camera={overlayCamera} />
-
-      {!hasInk && !screenshot && !editingText && <div className="canvas-empty"><button className="empty-paste" onClick={onPasteScreenshot}><Icon name="clipboard" size={25}/><span>Paste a screenshot</span></button></div>}
 
       <div className="canvas-topline">
         {screenshot && <button className="show-question" onClick={() => {

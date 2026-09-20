@@ -61,7 +61,6 @@ button { transition: background-color 160ms ease-out, color 160ms ease-out, opac
 .switch-track > span { display:block; width:10px; height:10px; background:var(--surface); border-radius:50%; transition:transform 160ms ease-out; }
 .latex-toggle.is-on .switch-track { background:var(--accent); }
 .latex-toggle.is-on .switch-track > span { transform:translateX(10px); }
-.canvas-empty { position:absolute; top:43%; left:20px; right:20px; transform:translateY(-50%); text-align:center; pointer-events:none; user-select:none; }
 .drawing-tools { position:absolute; bottom:64px; left:50%; transform:translateX(-50%); z-index:20; }
 .toolbar-row { display:flex; align-items:center; gap:5px; background:var(--surface); padding:6px; border:1px solid var(--line); border-radius:13px; box-shadow:var(--elevated); }
 .tool-button { display:flex; align-items:center; justify-content:center; gap:8px; min-width:42px; height:42px; border:0; padding:0 10px; background:transparent; color:var(--muted); border-radius:8px; font-size:12px; }
@@ -122,15 +121,13 @@ button { transition: background-color 160ms ease-out, color 160ms ease-out, opac
 }
 @media(max-width:600px) {
   .app-header {padding:0 16px;gap:12px;}.wordmark {font-size:23px;}.brand-symbol svg {width:26px;height:26px;}.header-actions {gap:6px;}.paste-button span {display:none;}.paste-button {width:36px;justify-content:center;padding:0!important;height:36px;}
-  .canvas-topline {left:16px;right:15px;top:16px;}.latex-toggle {font-size:10px;gap:6px;}.canvas-empty {top:40%;}.drawing-tools {bottom:65px;}.toolbar-row {gap:3px;}.tool-button {min-width:40px;padding:0 9px;}.tool-button span {display:none;}.canvas-footer {left:18px;right:18px;}.ink-options {width:300px;}.color-options {gap:1px;}
+  .canvas-topline {left:16px;right:15px;top:16px;}.latex-toggle {font-size:10px;gap:6px;}.drawing-tools {bottom:65px;}.toolbar-row {gap:3px;}.tool-button {min-width:40px;padding:0 9px;}.tool-button span {display:none;}.canvas-footer {left:18px;right:18px;}.ink-options {width:300px;}.color-options {gap:1px;}
   .tutor-island { right:12px; min-height:42px; padding:10px 12px; }.tutor-open .tutor-panel {width:100%;max-width:100%;border:0;}.tutor-heading {padding-top:17px;padding-bottom:17px;}
 }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after {animation:none!important;transition:none!important;scroll-behavior:auto!important;} }
 .paste-button, .show-question, .secondary-button { display:inline-flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--muted);font-size:12px; }
 .paste-button:hover, .show-question:hover, .secondary-button:hover { background:var(--surface-soft);color:var(--ink); }
 .show-question { pointer-events:auto;margin-right:auto;border:0;background:var(--paper);padding:6px 8px;font-size:11px; }
-.empty-paste { display:inline-flex;flex-direction:column;align-items:center;gap:16px;border:0;background:transparent;color:var(--muted);padding:24px;font-size:16px;pointer-events:auto; }
-.empty-paste svg { color:var(--faint); }.empty-paste:hover { color:var(--accent); }
 .tutor-heading h1 { margin:0;font-size:14px;font-weight:600; }
 .question-body { flex:1;min-height:0;overflow:auto;padding:8px 24px 28px; }
 .question-empty { max-width:30ch; }.question-empty h2 { margin-bottom:10px; }.question-empty p { margin:0 0 20px; color:var(--muted); font-size:13px; line-height:1.7; }
