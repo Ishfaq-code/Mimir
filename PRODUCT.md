@@ -16,7 +16,7 @@ The student writes freely, makes mistakes, asks questions aloud, and continues s
 
 A live AI tutor that follows handwritten work on an infinite canvas, talks with the student, and points to the exact part of the work it is discussing. The student should feel able to keep thinking and writing while help is available beside them.
 
-Success for the demo means the student can work through a pasted algebra question, ask for help, receive a useful spoken hint tied to their handwriting, correct a mistake, and reach the answer. For kinematics, success means pasting a problem, selecting it, and exploring a matching visualization with playback and timeline controls. Real recognition and tutor responses are required before describing the complete live tutoring experience as implemented.
+Success for the demo means the student can work through a pasted algebra question, ask for help, receive a useful spoken hint tied to their handwriting, correct a mistake, and reach the answer. For kinematics, success means pasting a problem, clicking Visualize on the textbox, and exploring a matching visualization with playback and timeline controls. Real recognition and tutor responses are required before describing the complete live tutoring experience as implemented.
 
 ## Positioning
 
@@ -24,11 +24,11 @@ Mimir combines a handwriting-first workspace with conversational tutoring and pr
 
 ## Operating Context
 
-The primary setting is independent practice after class on an iPad with Apple Pencil, delivered through a web app. A student can paste a screenshot, review and correct its OCR text, and confirm it as tutor context. They can also paste plain text onto the canvas, select its textbox, and choose Visualize; a selected screenshot uses its confirmed question.
+The primary setting is independent practice after class on an iPad with Apple Pencil, delivered through a web app. A student can paste a screenshot with ⌘V / Ctrl+V, review and correct its OCR text, and confirm it as tutor context. Right-click on the canvas offers copy, paste, cut, and delete. They can also paste a plain-text problem onto the canvas or into a textbox; a Visualize chip appears at the top-right of that textbox.
 
 Visualizations open in a modal and start playing automatically. Play/Pause, Forward, Backward, and the timeline support inspection. Closing the modal returns to the canvas. Keep the interface focused on the problem and controls, without the removed Kinematics heading or scope paragraph.
 
-The current hackathon visit is held in memory: reload loses drawings and questions. Replacing a screenshot preserves ink but clears question confirmation and ends voice. Closing the tutor panel retains its state and voice session. Provider secrets stay on the server; local screenshot OCR requires no provider key. Every submitted visualization problem uses the configured API, including demo examples.
+The current hackathon visit is held in memory: reload loses drawings and questions. Replacing a screenshot preserves ink but clears question confirmation and ends voice. Closing the tutor panel retains its state and voice session. Provider secrets stay on the server; local screenshot OCR requires no provider key. The four copyable demo problems return cached frames. Other visualization problems use the configured API, and identical text is reused from cache instead of regenerating.
 
 ## Capabilities and Constraints
 
@@ -47,7 +47,7 @@ The current hackathon visit is held in memory: reload loses drawings and questio
 | Constraints | Fast hackathon iteration, reuse existing tools/APIs when useful, approximately $20 total API budget. |
 | Kinematics visualization | Interpret pasted single-object problems through an API and calculate matching, validated visualizations: speeding up, braking to rest, constant speed, and downward free fall. Multiple bodies, collisions, direction reversals, and unknown launch-speed constraints are outside this visualization scope. |
 
-Students may also paste a plain-text problem onto the canvas, select its textbox, and open Visualize. Kinematics visualization uses an API to interpret each pasted problem, including the copyable demo examples. Examples guide interpretation rather than trigger pre-programmed answers; validated physics calculates the frames. Premade kinematics questions are copyable demo material, not a question selector.
+Students may also paste a plain-text problem onto the canvas or into a textbox, then click the Visualize chip on that box. Kinematics visualization uses an API to interpret each pasted problem, including the copyable demo examples. Examples guide interpretation rather than trigger pre-programmed answers; validated physics calculates the frames. Premade kinematics questions are copyable demo material, not a question selector.
 
 The screenshot flow supersedes the earlier preset algebra questions. Keep interface copy limited to necessary controls, chip status, and actionable errors. Typing is allowed for chip corrections and optional canvas textboxes. Freehand math remains the main solving interaction. The tutor is invoked as **Mimir**: a single orb starts and ends the voice session, with a screen-edge aura while it is live.
 
@@ -86,7 +86,7 @@ These are product constraints from the conversation, not a newly imposed aesthet
 
 ## Evidence on Hand
 
-- [Demo problems](docs/DEMO_PROBLEMS.md) provide copyable kinematics examples. They guide evaluation and interpretation, not preset matching.
+- [Demo problems](docs/DEMO_PROBLEMS.md) provide copyable kinematics examples. Those four paragraphs use cached frames; other wording is interpreted through the API.
 - [Implementation and verification record](docs/PROJECT_CONTEXT.md) distinguishes shipped behavior, tested integrations, and known gaps. It records successful live visualization API checks and desktop browser playback checks; these do not establish physical iPad/Pencil or complete live tutor validation.
 - [Run instructions](README.md) document the working web application and provider configuration.
 - The teaching examples above capture the requested tutoring behavior. They are requirements, not proof that proactive tutoring is fully implemented.

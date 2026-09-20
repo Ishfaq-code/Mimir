@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Icon from "./Icon";
 
 export interface VisualizationObject {
   id: string;
@@ -113,25 +114,26 @@ function renderLabel(label: string, layout: LabelLayout) {
   </g>;
 }
 
-function renderObject(object: VisualizationObject, labels: Record<string, LabelLayout>) {
+function renderObject(object: VisualizationObject, labels: Record<string, LabelLayout>, index: number, markerId: string) {
   const key = object.id;
   const x = object.x ?? 0;
   const y = object.y ?? 0;
   const color = object.color || "#2f9e44";
   const label = object.label && labels[object.id] ? renderLabel(object.label, labels[object.id]) : null;
+  const scene = { className: "visualize-scene-object", style: { animationDelay: `${Math.min(index, 6) * 80}ms` } };
 
-  if (object.type === "circle") return <g key={key}><circle cx={x} cy={y} r={object.radius ?? 12} fill={color}/>{label}</g>;
-  if (object.type === "rect") return <g key={key}><rect x={x} y={y} width={object.width ?? 40} height={object.height ?? 40} fill={color}/>{label}</g>;
+  if (object.type === "circle") return <g key={key} {...scene}><circle cx={x} cy={y} r={object.radius ?? 12} fill={color}/>{label}</g>;
+  if (object.type === "rect") return <g key={key} {...scene}><rect x={x} y={y} width={object.width ?? 40} height={object.height ?? 40} fill={color}/>{label}</g>;
   if (object.type === "line" || object.type === "arrow") {
-    const line = <line x1={x} y1={y} x2={object.x2 ?? x} y2={object.y2 ?? y} stroke={color} strokeWidth="4" markerEnd={object.type === "arrow" ? "url(#visualize-arrow)" : undefined}/>;
-    return <g key={key}>{line}{label}</g>;
+    const line = <line x1={x} y1={y} x2={object.x2 ?? x} y2={object.y2 ?? y} stroke={color} strokeWidth="4" markerEnd={object.type === "arrow" ? `url(#${markerId})` : undefined}/>;
+    return <g key={key} {...scene}>{line}{label}</g>;
   }
   if (object.type === "path") {
     const points = object.points ?? [];
     const path = points.map(point => `${point.x},${point.y}`).join(" ");
-    return <g key={key}><polyline points={path} fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>{label}</g>;
+    return <g key={key} {...scene}><polyline points={path} fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>{label}</g>;
   }
-  return <text key={key} x={x} y={y} fill={color} className="visualize-svg-text">{object.text ?? object.label ?? ""}</text>;
+  return <g key={key} {...scene}><text x={x} y={y} fill={color} className="visualize-svg-text">{object.text ?? object.label ?? ""}</text></g>;
 }
 
 // Interpolate validated keyframes for continuous playback without another API call.
@@ -169,7 +171,7 @@ function PlaybackIcon({ kind }: { kind: "play" | "pause" | "back" | "forward" })
 
 const variableNames: Record<string, string> = { t: "Time", x: "Distance", v: "Speed", a: "Acceleration" };
 
-export default function VisualizationResult({ data }: { data: VisualizationData }) {
+export default function VisualizationResult({ data, compact = false, markerId = "visualize-arrow", onPlaceOnCanvas }: { data: VisualizationData; compact?: boolean; markerId?: string; onPlaceOnCanvas?: () => void }) {
   const [position, setPosition] = useState(0);
   const [playing, setPlaying] = useState(true);
   const last = data.frames.length - 1;
@@ -216,22 +218,23 @@ export default function VisualizationResult({ data }: { data: VisualizationData 
     }
   }
 
-  return <div className="visualization-result">
+  return <div className={`visualization-result${compact ? " is-compact" : ""}`}>
     <div className="visualize-variable-panel" aria-label="Current variables">
       {frame.variables.map(variable => <div className="visualize-variable" key={`${variable.name}-${variable.unit}`}><span>{variableNames[variable.name] ?? variable.name}</span><strong>{displayValue(variable.value)} <small>{variable.unit}</small></strong></div>)}
     </div>
     <div ref={graphRef} className={`visualize-graph${vertical ? " is-vertical" : ""}`}>
       <svg viewBox={vertical ? "160 30 460 410" : "30 165 770 220"} role="img" aria-label={`${data.timeline.name} ${displayValue(frame.value)} ${data.timeline.unit}`}>
-        <defs><marker id="visualize-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="context-stroke"/></marker></defs>
+        <defs><marker id={markerId} markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="context-stroke"/></marker></defs>
         <rect width="800" height="450" fill="var(--paper)"/>
-        {frame.objects.map(object => renderObject(object, labels))}
+        {frame.objects.map((object, index) => renderObject(object, labels, index, markerId))}
       </svg>
     </div>
     <div className="visualize-controls">
-      <div className="visualize-transport"><span className="visualize-status">{isPlaying ? "Playing" : position >= last ? "Complete" : "Paused"}</span>
+      <div className="visualize-transport">
+      {onPlaceOnCanvas ? <button type="button" className="place-on-canvas" onClick={onPlaceOnCanvas} aria-label="Place visualization on canvas"><Icon name="place" size={16}/><span>Place on canvas</span></button> : null}
       <div className="visualize-navigation">
         <button type="button" className="secondary-button" onClick={() => seek(Math.ceil(position) - 1)} disabled={position === 0} aria-label="Step backward" title="Step backward"><PlaybackIcon kind="back"/></button>
-        <button type="button" className="primary-button" onClick={togglePlayback} disabled={last === 0} aria-label={isPlaying ? "Pause visualization" : "Play visualization"}><PlaybackIcon kind={isPlaying ? "pause" : "play"}/><span>{isPlaying ? "Pause" : "Play"}</span></button>
+        <button type="button" className="primary-button" onClick={togglePlayback} disabled={last === 0} aria-label={isPlaying ? "Pause visualization" : "Play visualization"}><PlaybackIcon kind={isPlaying ? "pause" : "play"}/></button>
         <button type="button" className="secondary-button" onClick={() => seek(Math.floor(position) + 1)} disabled={position >= last} aria-label="Step forward" title="Step forward"><PlaybackIcon kind="forward"/></button>
       </div>
       <span className="visualize-time">{displayValue(frame.value)} <span>/ {displayValue(data.timeline.maximum)} {data.timeline.unit}</span></span></div>

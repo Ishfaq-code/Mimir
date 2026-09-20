@@ -5,7 +5,7 @@ import LearningControls from "./LearningControls";
 import { loadPreferences, useLearningPreferences } from "@/lib/tutor/support";
 import { AnimatePresence } from "motion/react";
 import { useScreenshotQuestion } from "@/lib/useScreenshotQuestion";
-import InfiniteCanvas from "./InfiniteCanvas";
+import InfiniteCanvas, { type InfiniteCanvasHandle } from "./InfiniteCanvas";
 import MimirOrb from "./MimirOrb";
 import QuestionChip from "./QuestionChip";
 import Icon, { MimirMark } from "./Icon";
@@ -16,7 +16,6 @@ export default function PracticeWorkspace() {
   const preferences = useLearningPreferences();
   useEffect(() => { loadPreferences(); }, []);
   const [dark, setDark] = useState(false);
-  const [pasting, setPasting] = useState(false);
   const [visualizationOpen, setVisualizationOpen] = useState(false);
   const [visualizationProblem, setVisualizationProblem] = useState("");
   const [visualizationStatus, setVisualizationStatus] = useState<VisualizationStatus>("loading");
@@ -24,6 +23,7 @@ export default function PracticeWorkspace() {
   const [visualizationError, setVisualizationError] = useState("");
   const [visualizationRevision, setVisualizationRevision] = useState(0);
   const visualizationDialogRef = useRef<HTMLElement>(null);
+  const canvasRef = useRef<InfiniteCanvasHandle>(null);
   const visualizationAbortRef = useRef<AbortController | null>(null);
   const visualizationRequestIdRef = useRef(0);
   const question = useScreenshotQuestion();
@@ -70,7 +70,7 @@ export default function PracticeWorkspace() {
     if (problem) void requestVisualization(problem);
     else {
       setVisualizationStatus("error");
-      setVisualizationError("Paste your problem onto the canvas, select its textbox, then click Visualize.");
+      setVisualizationError("Paste your problem onto the canvas, then click Visualize on the textbox.");
     }
   }, [requestVisualization]);
 
@@ -83,6 +83,12 @@ export default function PracticeWorkspace() {
     setVisualization(null);
     setVisualizationError("");
   }, []);
+
+  const placeVisualizationOnCanvas = useCallback(() => {
+    if (!visualization) return;
+    canvasRef.current?.embedVisualization(visualizationProblem, visualization);
+    closeVisualization();
+  }, [visualization, visualizationProblem, closeVisualization]);
 
   useEffect(() => {
     if (!visualizationOpen) return;
@@ -128,36 +134,18 @@ export default function PracticeWorkspace() {
     return () => window.removeEventListener("paste", paste);
   }, [acceptImage, visualizationOpen]);
 
-  async function pasteScreenshot() {
-    setPasting(true);
-    setPasteError("");
-    try {
-      if (!navigator.clipboard?.read) throw new Error("Use your browser’s Paste command, or press ⌘V / Ctrl+V.");
-      const items = await navigator.clipboard.read();
-      for (const item of items) {
-        const type = item.types.find(value => value.startsWith("image/"));
-        if (type) { await acceptImage(await item.getType(type)); return; }
-      }
-      setPasteError("Copy a screenshot, then paste it here.");
-    } catch (failure) {
-      setPasteError(failure instanceof Error && failure.message.startsWith("Use your")
-        ? failure.message : "Paste access is blocked. Use your browser’s Paste command, or press ⌘V / Ctrl+V.");
-    } finally { setPasting(false); }
-  }
-
   return (
     <div className="practice-app" data-theme={dark ? "dark" : "light"} data-calm={preferences.calm} data-large-text={preferences.largeText} data-roomy-text={preferences.roomyText}>
       <header className="app-header" inert={visualizationOpen}>
         <div className="wordmark" aria-label="Mimir"><span className="brand-symbol"><MimirMark /></span>mimir<span className="brand-period">.</span></div>
         <div className="header-actions">
-          <button className="paste-button" aria-label="Paste screenshot" onClick={() => void pasteScreenshot()} disabled={pasting}><Icon name="clipboard" size={17}/><span>Paste screenshot</span></button>
           <LearningControls />
           <button className="icon-button theme-toggle" onClick={() => setDark(value => !value)} aria-label={dark ? "Use light theme" : "Use dark theme"}><Icon name={dark ? "sun" : "moon"} size={19}/></button>
         </div>
       </header>
       <div className="workspace-layout" inert={visualizationOpen}>
         <main className="workspace-main" aria-label="Math workspace">
-          <InfiniteCanvas dark={dark} screenshot={question.screenshot} questionText={question.chipOpen ? question.text : null} onVisualizeRequest={openVisualization} />
+          <InfiniteCanvas ref={canvasRef} dark={dark} screenshot={question.screenshot} onVisualizeRequest={openVisualization} onPasteImage={acceptImage} onRemoveScreenshot={question.removeScreenshot} />
           {question.pasteError && <div className="paste-notice" role="alert"><span>{question.pasteError}</span><button className="icon-button" aria-label="Dismiss paste message" onClick={() => setPasteError("")}><Icon name="close" size={16}/></button></div>}
           <MimirOrb />
           <AnimatePresence>
@@ -178,11 +166,11 @@ export default function PracticeWorkspace() {
       </div>
       {visualizationOpen && <div className="visualize-backdrop" role="presentation" onMouseDown={closeVisualization}>
         <section ref={visualizationDialogRef} tabIndex={-1} className="visualize-modal" role="dialog" aria-modal="true" aria-label="Problem visualization" onMouseDown={event => event.stopPropagation()}>
-          <div className="visualize-heading">{visualizationProblem && <div className="visualize-problem"><p>{visualizationProblem}</p></div>}<button className="icon-button" type="button" onClick={closeVisualization} aria-label="Close visualization"><Icon name="close" size={18}/></button></div>
+          <div className="visualize-heading">{visualizationProblem && <div className="visualize-problem"><h2>{visualizationProblem}</h2></div>}<button className="icon-button" type="button" onClick={closeVisualization} aria-label="Close visualization"><Icon name="close" size={18}/></button></div>
           <div className="visualize-body">
             {visualizationStatus === "loading" && <div className="visualize-loading" role="status"><span className="review-dot"/>Building the visualization…</div>}
             {visualizationStatus === "error" && <div className="visualize-error" role="alert"><p>{visualizationError}</p>{visualizationProblem && <button className="primary-button" type="button" onClick={() => void requestVisualization(visualizationProblem)}>Try again</button>}</div>}
-            {visualizationStatus === "success" && visualization && <VisualizationResult key={visualizationRevision} data={visualization}/>}
+            {visualizationStatus === "success" && visualization && <VisualizationResult key={visualizationRevision} data={visualization} onPlaceOnCanvas={placeVisualizationOnCanvas}/>}
           </div>
         </section>
       </div>}

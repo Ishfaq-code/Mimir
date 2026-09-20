@@ -4,7 +4,7 @@ Updated **2026-09-20** after the Mimir orb/aura voice revamp and the passive que
 
 ## Current experience
 
-Mimir is an iPad-oriented math workspace. The student pastes a screenshot directly into the whiteboard using the native paste command or Paste screenshot button. The image is placed in world coordinates behind the ink. Browser-based OCR reads the question and a floating chip near the Mimir orb shows the text with tap-to-edit; edits update tutor context live. Pressing the orb starts live voice with or without a pasted question; a screen-edge aura shows while the tutor is live. The old Tutor sidebar and its confirm step were removed on 2026-09-20. Preset questions, prepared guides, and decorative copy have been removed.
+Mimir is an iPad-oriented math workspace. The student pastes a screenshot directly into the whiteboard using the native paste command. Right-click offers copy, paste, cut, and delete. The image is placed in world coordinates behind the ink. Browser-based OCR reads the question and a floating chip near the Mimir orb shows the text with tap-to-edit; edits update tutor context live. Pressing the orb starts live voice with or without a pasted question; a screen-edge aura shows while the tutor is live. The old Tutor sidebar and its confirm step were removed on 2026-09-20. Preset questions, prepared guides, and decorative copy have been removed.
 
 Repository: `Ishfaq-code/Mimir`. Local root: `/Users/stevin/Documents/Projects/Mimir`. The thread's default `stevin-port` directory is a separate project. Work on `main`, pull before implementation, preserve collaborators, and never force-push.
 
@@ -18,7 +18,7 @@ Repository: `Ishfaq-code/Mimir`. Local root: `/Users/stevin/Documents/Projects/M
 | Review | Passive question chip: read text with tap-to-edit, live tutor-context updates, retry/manual fallback, cancellation and stale-result guards. Normal text paste remains available inside the chip editor. |
 | Voice context | `CanvasState.question` holds the chip text, separate from recognized student equations. Chip edits and screenshot replacement keep the voice session alive; the agent pulls context live via RPC. |
 | Canvas selection | Select (V/1) supports click/Shift-click, marquee selection, multi-element movement, and corner resizing. Pasted screenshots can also be selected, moved, and resized. |
-| Textboxes | Select Text (T), tap to place or edit. Done/Enter saves, Shift+Enter adds a line, Escape/Cancel discards. Uses ink color; undo/redo and eraser apply. Text remains visual canvas content, separate from question confirmation and stroke recognition. Selecting a textbox and choosing Visualize immediately requests a Physics word-problem visualization. |
+| Textboxes | Select Text (T), tap to place or edit. Done/Enter saves, Shift+Enter adds a line, Escape/Cancel discards. Ctrl+V / ⌘V pastes into an open textbox and the box grows to show the full text. Uses ink color; undo/redo and eraser apply. Text remains visual canvas content, separate from question confirmation and stroke recognition. A Visualize chip on the top-right of a textbox requests a Physics word-problem visualization. |
 | Handwriting | Existing custom Canvas 2D engine. Pen stays selected; no stroke selection handles. Eight colors including white, widths 1/2/4, undo/redo. |
 | Navigation | Wheel pan, modifier-wheel zoom, Space/middle-button drag, finger pan, zoom controls. |
 | MyScript | Optional Typeset math switch recognizes freehand strokes via backend `/ws/latex`. Separate from screenshot OCR. |
@@ -27,7 +27,7 @@ Repository: `Ishfaq-code/Mimir`. Local root: `/Users/stevin/Documents/Projects/M
 | Tutor annotations | Checked visual plans can recolor exact source strokes and place a single equivalent scaffold with a handwriting blank; revision gates reject stale plans. |
 | Error states | Recognition failures preserve ink and expose retry. Voice failures show a recoverable error. |
 | Persistence | In-memory visit only. Reload clears image, reviewed question, and ink. |
-| Visualization | Selected textbox or question-chip text is sent with `kinematics` topic to `POST /visualize` (legacy `physics` still accepted). OpenRouter extracts inputs for a single object moving in one direction with constant acceleration. Visualize requires a selected textbox or selected screenshot with OCR text; no selection shows paste/select guidance. Plain-text native paste creates a wrapped, undoable textbox. Every submitted problem calls OpenRouter, including demo paragraphs. `backend/kinematics_prompt.py` supplies interpretation rules and examples; extracted object labels and quantities drive validated rendering. `GET /visualize/question?kind=speed_up\|braking\|constant_speed\|free_fall` returns question text and nine matching frames without a provider call. Timeline and variable controls render the result. |
+| Visualization | Textbox text is sent with `kinematics` topic to `POST /visualize` (legacy `physics` still accepted). The four demo paragraphs return cached frames without OpenRouter. Other problems extract through OpenRouter and reuse an in-memory cache for the same normalized text. Visualize is a chip on the top-right of the pasted textbox; no problem on the board shows paste-then-chip guidance. Plain-text native paste creates a wrapped, undoable textbox that grows to the full problem. Place on canvas embeds the playing visualization as a draggable, resizable board overlay. `backend/kinematics_prompt.py` supplies interpretation rules and examples; extracted object labels and quantities drive validated rendering. `GET /visualize/question?kind=speed_up\|braking\|constant_speed\|free_fall` returns question text and nine matching frames without a provider call. Timeline and variable controls render the result. |
 | Absent | Accounts, teacher reports, durable storage, other import methods, generated visualizations beyond the Physics keyframe flow, animated demonstrations, reliable proactive error detection. |
 
 ## Ownership and data flow
@@ -54,10 +54,10 @@ flowchart td
 | `frontend/lib/useScreenshotQuestion.ts` | Screenshot lifecycle, asynchronous import versions, abortable OCR, chip text with live tutor-context updates. |
 | `frontend/lib/screenshot.ts` | File validation/decode, Tesseract lazy import, OCR progress/timeout/cancellation, worker cleanup. |
 | `frontend/scripts/prepare-ocr.mjs` | Copies installed worker, core variants, language data, and licenses to ignored `public/ocr/` before dev/build. Resolves under npm and pnpm layouts. |
-| `frontend/components/InfiniteCanvas.tsx` | Existing stroke capture/history/recognition, camera, reference image placement, canvas tools, and selected-text visualization requests. |
+| `frontend/components/InfiniteCanvas.tsx` | Existing stroke capture/history/recognition, camera, reference image placement, canvas tools, and textbox Visualize chips. |
 | `frontend/components/VisualizationResult.tsx` | Safe SVG renderer for validated visualization keyframes, timeline slider, and Previous/Next controls. |
 | `frontend/lib/canvas/renderer.ts` | World-space image followed by ink painting. Existing smoothing is unchanged. |
-| `frontend/components/IslandToolbar.tsx` | Pen/Eraser/Text, colors/width, undo/redo. |
+| `frontend/components/IslandToolbar.tsx` | Select/Pen/Eraser/Text, colors/width, undo/redo. |
 | `frontend/components/CanvasTextEditor.tsx` | Positioned textbox editor, multiline input, outside-click save, cancellation and focus handling. |
 | `frontend/components/MimirOrb.tsx` | Press-to-talk orb, LiveKit token/room/microphone/audio and RPC lifecycle, state-reactive screen aura, reduced-motion support. |
 | `frontend/components/QuestionChip.tsx` | Floating pasted-question chip: reading status, text preview, live-edit popover, retry/dismiss. |
@@ -118,7 +118,7 @@ Validate native screenshot paste and review on the actual iPad; configure and ex
 
 ### Paste-to-visualize update, 2026-09-20
 
-The current UI supersedes the generated-question selector described above. Paste plain text, select its textbox, and click Visualize. The modal never silently substitutes generated practice. Four copyable demo questions use whitespace-normalized exact matching before provider extraction; edits to their content use normal extraction. Screenshot confirmation and voice context remain separate.
+The current UI supersedes the generated-question selector described above. Paste plain text, then click Visualize on the textbox chip. The modal never silently substitutes generated practice. Four copyable demo questions use whitespace-normalized exact matching before provider extraction; edits to their content use normal extraction. Screenshot confirmation and voice context remain separate.
 
 Verification for this update: TypeScript and targeted frontend ESLint passed; all eight backend regression tests passed. Disposable Chromium exercised all four pasted demo paragraphs through selection and modal rendering, empty-selection guidance, Escape, and a 390 px dark layout with no runtime errors. Physical iPad/Pencil and live custom-provider extraction were not tested. The existing graph lint failures remain outside this change.
 
@@ -230,6 +230,12 @@ Speech integration was checked against installed LiveKit 1.8.2 and [OpenAI strea
 The combined workspace keeps the orb, inline caption dock, learning preferences, focus, checked hints and precise ink tinting. It also retains main's plain-text paste, physics visualization dialog and selectable-typeset Graph tool. Visualization reads the live OCR chip text when a screenshot is selected; there is no stale confirmation/sidebar dependency. The modal sits above the voice controls and makes the background inert. Pasted text starts below the focus control. Renderer arguments preserve both exact stroke highlighting and suppression of duplicate selection boxes around recognized source strokes.
 
 Graph auto-fit now initializes with the expression rather than setting state in an effect; animation/wheel refs synchronize after commit. Both npm and pnpm lockfiles contain `mathjs` and `motion`. `CORS_ORIGINS` makes an isolated preview possible without changing the normal port-3000 setup.
+
+### Graphing coverage, 2026-09-20
+
+The selectable-typeset Graph tool now normalizes common LaTeX forms into safe `mathjs` expressions for any single-input `y=f(x)` curve in the supported numeric function family: polynomial, rational, exponential, logarithmic, square-root, absolute-value, trigonometric, inverse-trigonometric, hyperbolic, rounding, and basic min/max/sign functions. `x` is always the independent variable; every other free symbol becomes a coefficient slider, while `e`, `pi`, `x`, `y`, and function names are excluded. Balanced fractions and roots, implicit multiplication such as `Bx` or `2x`, shorthand calls such as `lnx`/`sinx`, powered calls such as `sin^2x`, domain gaps, and rational asymptotes are handled without executing generated code. Multiple selected recognized equations now share one graph overlay, with distinct curve colors, a legend, shared axes, combined auto-fit, and shared sliders for coefficients with the same name. Sampling breaks curves across undefined values and abrupt asymptote jumps, and auto-fit ignores extreme outliers. `frontend/scripts/test-graph.mjs` covers representative forms, shorthand functions, powered functions, coefficient extraction, multi-curve sampling, logarithmic domains, and asymptote gaps.
+
+Verification: graph regression tests, ESLint, TypeScript, and the Next.js production build passed. Browser and physical iPad/Pencil graph interaction remain unverified.
 
 Local preview: `/Users/stevin/Documents/Projects/Mimir-integration`, frontend `http://localhost:3001`, backend `http://localhost:8001`. Ignored environment files copy the existing local provider configuration; frontend endpoints point at port 8001. The unchanged tutor agent can use the existing running worker; do not start a second unscoped worker against the same LiveKit project. Live Visualize generation requires `OPENROUTER_API_KEY`; it is now configured locally in the ignored backend environment file. Never commit environment files.
 
