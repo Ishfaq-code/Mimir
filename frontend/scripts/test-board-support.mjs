@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import ts from 'typescript';
 const temp = mkdtempSync(join(process.cwd(), '.board-check-'));
-const modules = ['screenshot', 'tutor/types', 'tutor/support', 'tutor/boardView', 'tutor/store', 'tutor/teachingPlan', 'canvas/types', 'canvas/inkRegions', 'canvas/renderer', 'canvas/capture'];
+const modules = ['screenshot', 'tutor/types', 'tutor/support', 'tutor/boardView', 'tutor/store', 'tutor/handwriting', 'tutor/teachingPlan', 'canvas/types', 'canvas/inkRegions', 'canvas/renderer', 'canvas/capture'];
 try {
   for (const name of modules) {
     const output = join(temp, `${name}.js`);
@@ -20,8 +20,8 @@ try {
   const view = {snapshotId:'test',revision:'a',width:1400,height:700,world:{x:-120,y:250,width:800,height:400},text:[],regions:[{id:'R1',bounds:{x:30,y:40,width:20,height:30}},{id:'R2',bounds:{x:90,y:42,width:22,height:32}}]};
   assert.deepEqual(board.regionToWorld(view,{x:250,y:500,width:100,height:100}),{x:80,y:450,width:80,height:40});
   for (const region of [{x:NaN,y:0,width:2,height:2},{x:-1,y:0,width:2,height:2},{x:999,y:0,width:3,height:2},{x:0,y:0,width:0,height:2}]) assert.equal(board.regionToWorld(view,region),null);
-  let revision='a',captures=0,busy=false;
-  const detach=board.registerBoardSource({revision:()=>revision,isBusy:()=>busy,capture:async()=>{captures++;return {view,blob:new Blob()};},snap:b=>b});
+  let revision='a',captures=0,busy=false,settled=true;
+  const detach=board.registerBoardSource({revision:()=>revision,isBusy:()=>busy,isSettled:()=>settled,capture:async()=>{captures++;return {view,blob:new Blob()};},snap:b=>b});
   const args={snapshotId:'test',x:250,y:500,width:100,height:100,label:'3 × 2'};
   assert.equal(board.highlightRegion(args).success,false);
   await board.captureBoard();
@@ -32,6 +32,11 @@ try {
   assert.equal(board.getBoardStatus().ready,false);
   await assert.rejects(board.captureBoard(),/writing/);
   busy=false;
+  settled=false;
+  assert.equal(board.getBoardStatus().ready,false,'Brief pen lifts are still writing');
+  assert.equal(board.getCurrentView('test'),null,'Do not apply a check while ink is settling');
+  await assert.rejects(board.captureBoard(),/writing/);
+  settled=true;
   assert.equal(board.highlightRegion(args).success,true);
   assert.deepEqual(board.getHighlight().bounds,{x:80,y:450,width:80,height:40});
   assert.equal(board.highlightKnownRegions({snapshotId:'test',regionIds:['R1','R2'],label:'3 × 2'}).success,true);
@@ -82,7 +87,24 @@ try {
   const world={x:0,y:0,width:1200,height:720}, problem={x:100,y:120,width:200,height:30};
   const placed=teaching.scaffoldPosition(world,problem,250,64,[]);
   assert.ok(placed && placed.y>150);
-  assert.equal(teaching.scaffoldPosition(world,problem,250,64,[{x:0,y:0,width:1200,height:720}]),null, 'Do not write over occupied space');
+  const belowOccupied=teaching.scaffoldPosition(world,problem,250,64,[{x:0,y:0,width:1200,height:720}]);
+  assert.ok(belowOccupied.y>720,'Use empty space below a full viewport; reveal pans there');
+  const belowWork=teaching.scaffoldPosition(world,problem,250,74,[{x:100,y:320,width:180,height:55},{x:850,y:650,width:150,height:60}]);
+  assert.equal(belowWork.x,100,'Stay aligned to the working column');
+  assert.ok(belowWork.y>375 && belowWork.y<650,'Follow the student work, not another column');
+  assert.equal(teaching.scaffoldPosition(world,problem,2000,74,[]),null,'Do not squeeze illegible steps into the viewport');
+  const handwriting=require(join(temp,'tutor/handwriting.js'));
+  for(const expression of ['5 * 4 = {{blank}}','2*x + {{blank}} = 14','1/2 + 1/3 = {{blank}}','x^(2+1) = {{blank}}','X + x = {{blank}}']) {
+    const drawing=handwriting.layoutHandwriting(expression);
+    assert.ok(drawing?.paths.length && drawing.width>100);
+    assert.ok(drawing.paths.every(p=>p.y-4*p.scale>=0 && p.y+44*p.scale<=drawing.height));
+    assert.ok(drawing.paths.some(p=>p.d==='M3 35 Q49 34 98 35'),'Keep a wide handwriting blank');
+  }
+  const power=handwriting.layoutHandwriting('x^2');
+  assert.ok(power.paths.some(p=>p.scale<1),'Powers are raised and scaled, not lost');
+  assert.notDeepEqual(handwriting.layoutHandwriting('X').paths,handwriting.layoutHandwriting('x').paths,'Case must retain its mathematical meaning');
+  assert.equal(handwriting.layoutHandwriting('x^('),null);
+  assert.equal(handwriting.layoutHandwriting('<script>'),null);
   assert.equal(teaching.applyTeachingPlan({snapshotId:'old',problemRegionIds:['R1'],regionIds:[],label:'',scaffold:null}).success,false);
   detach(); assert.equal(board.getHighlight(),null);
   console.log('Passed: world coordinates, invalid regions, stale images, pause, preferences, ink snapping, focus invalidation, scaffold placement and cleanup.');

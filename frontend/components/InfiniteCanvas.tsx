@@ -230,6 +230,7 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
   const styleRef = useRef<ElementStyle>({ ...DEFAULT_STYLE, strokeColor: dark ? "#ffffff" : DEFAULT_STYLE.strokeColor });
   const darkRef = useRef(dark);
   const activePointerRef = useRef<number | null>(null);
+  const lastInteractionRef = useRef(-Infinity);
 
   const actionRef = useRef<Action>({ type: "none" });
   const curElRef = useRef<CanvasElement | null>(null);
@@ -261,6 +262,8 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
   const [editingText, setEditingText] = useState<TextDraft | null>(null);
   const textDraftRef = useRef<TextDraft | null>(null);
   const [graphs, setGraphs] = useState<GraphInstance[]>([]);
+  const graphsRef = useRef(graphs);
+  useEffect(() => { graphsRef.current = graphs; }, [graphs]);
   const [selectedLatexIds, setSelectedLatexIds] = useState<Set<string>>(new Set());
   const [erasing, setErasing] = useState(false);
   const erasingRef = useRef(false);
@@ -367,7 +370,7 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
 
   function sceneRevision() {
     const shot = screenshotRef.current;
-    const value = JSON.stringify([elementsRef.current, shot && [shot.image.src, shot.x, shot.y, shot.width, shot.height], getCanvasState().question, getCanvasState().tutorAnnotations, getFocus(), cameraRef.current, canvasRef.current?.clientWidth, canvasRef.current?.clientHeight]);
+    const value = JSON.stringify([elementsRef.current, shot && [shot.image.src, shot.x, shot.y, shot.width, shot.height], graphsRef.current, getCanvasState().question, getCanvasState().tutorAnnotations, getFocus(), cameraRef.current, canvasRef.current?.clientWidth, canvasRef.current?.clientHeight]);
     let hash = 2166136261;
     for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619);
     return (hash >>> 0).toString(36);
@@ -376,14 +379,28 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
   useEffect(() => registerBoardSource({
     revision: sceneRevision,
     isBusy: () => actionRef.current.type !== "none" || !!textDraftRef.current,
+    isSettled: () => performance.now() - lastInteractionRef.current >= 1000,
+    reveal: bounds => {
+      const cam = cameraRef.current;
+      const height = canvasRef.current?.clientHeight;
+      if (!height) return;
+      const bottom = bounds.y + bounds.height + 160 / cam.zoom;
+      if (bottom <= cam.y + height / cam.zoom) return;
+      cam.y = bottom - height / cam.zoom;
+      setOverlayCamera({ ...cam });
+      render();
+    },
     hasContent: () => !!screenshotRef.current || elementsRef.current.some(el=>!el.isDeleted),
     capture: () => {
       if (actionRef.current.type !== "none" || textDraftRef.current) return Promise.reject(new Error("Student is writing; try again after they finish"));
       const rect = canvasRef.current!.getBoundingClientRect();
-      return captureScene(elementsRef.current, screenshotRef.current, { ...cameraRef.current }, rect.width, rect.height, darkRef.current, sceneRevision());
+      return captureScene(elementsRef.current, screenshotRef.current, { ...cameraRef.current }, rect.width, rect.height, darkRef.current, sceneRevision()).then(capture => {
+        capture.view.obstacles?.push(...graphsRef.current.map(graph => ({x:graph.x,y:graph.y,width:graph.w,height:graph.h})));
+        return capture;
+      });
     },
     snap: bounds => snapToInk(bounds, elementsRef.current),
-  }), []);
+  }), [render]);
 
   const updateStyle = useCallback((u: Partial<ElementStyle>) => {
     const next = { ...styleRef.current, ...u };
@@ -633,6 +650,7 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
   }, [latexEnabled, scheduleRecognition]);
 
   const syncScene = useCallback(() => {
+    lastInteractionRef.current = performance.now();
     setHistoryState({ canUndo: histIdxRef.current > 0, canRedo: histIdxRef.current < historyRef.current.length - 1 });
   }, []);
 
@@ -710,6 +728,7 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (activePointerRef.current !== null || (e.button !== 0 && e.button !== 1)) return;
+    lastInteractionRef.current = performance.now();
     activePointerRef.current = e.pointerId;
     canvasRef.current?.setPointerCapture(e.pointerId);
     const sp = screenPos(e);
@@ -1008,6 +1027,7 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.pointerId !== activePointerRef.current) return;
+    lastInteractionRef.current = performance.now();
     activePointerRef.current = null;
     const act = actionRef.current;
 
@@ -1053,6 +1073,7 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
 
   const cancelText = useCallback((key: string) => {
     if (textDraftRef.current?.key !== key) return;
+    lastInteractionRef.current = performance.now();
     textDraftRef.current = null;
     setEditingText(null);
     render();
@@ -1061,6 +1082,7 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
   const finalizeText = useCallback((text: string, key: string) => {
     const draft = textDraftRef.current;
     if (!draft || draft.key !== key) return;
+    lastInteractionRef.current = performance.now();
     textDraftRef.current = null;
     setEditingText(null);
     const val = text.trimEnd();

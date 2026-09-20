@@ -240,6 +240,9 @@ def get_token(room: str | None = None) -> dict[str, str]:
         .with_identity(identity)
         .with_name("Student")
         .with_grants(api.VideoGrants(room_join=True, room=room))
+        .with_room_config(api.RoomConfiguration(agents=[api.RoomAgentDispatch(
+            agent_name=os.getenv("LIVEKIT_AGENT_NAME", "mimir-tutor").strip() or "mimir-tutor",
+        )]))
         .to_jwt()
     )
     return {"token": token, "url": url, "room": room, "identity": identity}

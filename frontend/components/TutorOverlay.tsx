@@ -7,6 +7,8 @@ import type { Camera } from "@/lib/canvas/types";
 import { clearHighlight, getHighlight, subscribeHighlight } from "@/lib/tutor/boardView";
 import { useLearningPreferences } from "@/lib/tutor/support";
 import { getTutorAnnotations, subscribe, removeTutorAnnotation } from "@/lib/tutor/store";
+import { layoutHandwriting } from "@/lib/tutor/handwriting";
+import HandwrittenStep from "./HandwrittenStep";
 
 const TUTOR_COLOR = "var(--accent)"; // tutor annotations are visually distinct
 const BASE_FONT_SIZE = 34; // px at zoom = 1
@@ -49,12 +51,13 @@ export default function TutorOverlay({ camera }: { camera: Camera }) {
           <button className="tutor-focus-dismiss" onClick={clearHighlight} aria-label={`Dismiss highlight on ${highlight.label}`} title={highlight.label}>×</button>
         </div>
       )}
-      {annotations.map((a) => (
-        <div key={a.id} className="tutor-scaffold" style={place(a.x, a.y)}>
-          <Katex latex={a.latex} color={TUTOR_COLOR} />
+      {annotations.map((a) => {
+        const drawing = a.template ? layoutHandwriting(a.template) : null;
+        return <div key={a.id} className="tutor-scaffold" style={{ ...place(a.x, a.y), color: TUTOR_COLOR }}>
+          {drawing ? <HandwrittenStep drawing={drawing} createdAt={a.createdAt} calm={preferences.calm}/> : <Katex latex={a.latex} color={TUTOR_COLOR} />}
           <button className="tutor-scaffold-dismiss" aria-label="Remove tutor step" onClick={() => removeTutorAnnotation(a.id)}>×</button>
-        </div>
-      ))}
+        </div>;
+      })}
     </div>
   );
 }

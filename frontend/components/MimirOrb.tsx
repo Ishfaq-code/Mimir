@@ -69,7 +69,6 @@ export default function MimirOrb() {
           type="button"
           className="mimir-orb"
           onClick={() => (connected ? void disconnect() : void connect())}
-          disabled={status === "connecting"}
           animate={orbAnimate}
           transition={orbTransition}
           whileHover={reduced ? undefined : { scale: connected ? 1 : 1.06 }}

@@ -3,13 +3,11 @@ import logging
 
 from livekit import agents, rtc
 from livekit.agents import AgentSession, room_io
-from openai.types.realtime.realtime_audio_input_turn_detection import ServerVad
 from livekit.agents.voice.agent_activity import ActivityClosedError
-from livekit.plugins import openai
 
 import config
 from tools.types import TutorSessionState
-from tutor import MathTutor
+from voice_models import create_realtime_model
 
 logger = logging.getLogger("mimir-tutor")
 logging.basicConfig(level=logging.INFO)
@@ -21,33 +19,48 @@ GREETING_INSTRUCTIONS = (
 
 async def greet(session: AgentSession) -> None:
     try:
-        await session.generate_reply(instructions=GREETING_INSTRUCTIONS, tool_choice="none", allow_interruptions=True).wait_for_playout()
+        await session.generate_reply(instructions=GREETING_INSTRUCTIONS, tool_choice="auto" if config.TUTOR_PROVIDER == 'gemini' else "none", allow_interruptions=True).wait_for_playout()
     except (RuntimeError, ActivityClosedError):
         pass
     # An interruption belongs to the student. Never retry over their speech.
 
 
 async def entrypoint(ctx: agents.JobContext):
-    await ctx.connect()
-    logger.info("Agent connected to room %s", ctx.room.name)
+    @ctx.room.on("disconnected")
+    def on_room_disconnected(reason):
+        logger.info("Agent room disconnected: reason=%s", rtc.DisconnectReason.Name(reason))
 
-    participant = await ctx.wait_for_participant()
+    await ctx.connect()
+    logger.info("Agent connected to room %s; participants=%s", ctx.room.name, [
+        (p.identity, p.kind, p.state) for p in ctx.room.remote_participants.values()
+    ])
+
+    try:
+        participant = await ctx.wait_for_participant()
+    except RuntimeError:
+        if ctx.room.isconnected():
+            raise
+        logger.info("Room closed before a student was ready")
+        ctx.shutdown(reason="room closed during startup")
+        return
     logger.info("Student joined: %s", participant.identity)
 
+    native_gemini = config.TUTOR_PROVIDER == 'gemini'
     session = AgentSession(
-        llm=openai.realtime.RealtimeModel(
-            model=config.OPENAI_REALTIME_MODEL,
-            voice=config.TUTOR_VOICE,
-            input_audio_noise_reduction="far_field",
-            turn_detection=ServerVad(type="server_vad", threshold=0.75, prefix_padding_ms=300, silence_duration_ms=350, create_response=False, interrupt_response=False),
-        ),
+        llm=create_realtime_model(),
         userdata=TutorSessionState(),
         # Keep the microphone live during speech. Application-owned interruption
         # cancels both audio and any pending checked plan on speech-start events.
-        turn_handling={"turn_detection": "manual", "interruption": {"enabled": True, "discard_audio_if_uninterruptible": False}},
+        turn_handling={"turn_detection": "realtime_llm" if native_gemini else "manual", "interruption": {"enabled": True, "discard_audio_if_uninterruptible": False}},
     )
 
-    tutor = MathTutor(participant.identity)
+    if native_gemini:
+        from gemini_tutor import GeminiTutor
+        tutor = GeminiTutor(participant.identity)
+    else:
+        from tutor import MathTutor
+        tutor = MathTutor(participant.identity)
+    logger.info('Tutor voice provider: %s', config.TUTOR_PROVIDER)
 
     @session.on("agent_state_changed")
     def on_agent_state(event):
@@ -56,7 +69,9 @@ async def entrypoint(ctx: agents.JobContext):
 
     @session.on("user_input_transcribed")
     def on_transcript(event):
-        if event.is_final:
+        if native_gemini:
+            tutor.on_voice_transcript(event.transcript, event.is_final)
+        elif event.is_final:
             tutor.submit(event.transcript, source='voice')
 
     @session.on("user_state_changed")
@@ -94,5 +109,18 @@ async def entrypoint(ctx: agents.JobContext):
     await greet(session)
 
 
+def prewarm(proc: agents.JobProcess):
+    if config.TUTOR_PROVIDER == 'gemini':
+        import importlib
+        importlib.import_module('livekit.plugins.google')
+        importlib.import_module('gemini_tutor')
+
+
 if __name__ == "__main__":
-    agents.cli.run_app(agents.WorkerOptions(entrypoint_fnc=entrypoint))
+    agents.cli.run_app(agents.WorkerOptions(
+        entrypoint_fnc=entrypoint,
+        prewarm_fnc=prewarm,
+        agent_name=config.LIVEKIT_AGENT_NAME,
+        # Dev mode otherwise imports the entire agent on each new connection.
+        num_idle_processes=1,
+    ))

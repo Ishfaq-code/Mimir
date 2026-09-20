@@ -67,7 +67,7 @@ class BoardPreparation:
         return None
 
     async def _watch(self):
-        observed=None;changed=perf_counter();last_started=-10.0
+        observed=None;last_started=-10.0
         try:
             while True:
                 await asyncio.sleep(.45)
@@ -76,12 +76,13 @@ class BoardPreparation:
                 except Exception:continue
                 revision=status.get('revision') if status.get('ready') and status.get('hasContent') else None
                 if revision!=observed:
-                    observed=revision;changed=perf_counter()
+                    observed=revision
                     if self.revision!=revision:self.invalidate()
                 if not revision or self.busy():continue
                 now=perf_counter()
-                # Don't send partial strokes or spend one API request per pen lift.
-                if now-changed>=.9 and now-last_started>=4 and self.revision!=revision:
+                # ready already includes the browser's pen-up quiet period.
+                # Keep the API budget throttle, without a second idle delay.
+                if now-last_started>=4 and self.revision!=revision:
                     last_started=now;self.begin(revision)
         except asyncio.CancelledError:raise
 

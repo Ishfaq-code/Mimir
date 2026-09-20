@@ -4,7 +4,7 @@ Mimir is an iPad-oriented AI math tutor project: students write on an infinite c
 
 **Current state:** paste a screenshot onto the canvas with ⌘V / Ctrl+V or the Paste screenshot button. The app reads it locally and shows the recognized text in a floating chip with tap-to-edit; edits update the tutor's context immediately. The original image stays on the canvas with Pen/Eraser/Text, undo/redo, and light/dark themes. A floating Mimir orb starts and ends the voice tutor; a screen-edge aura shows while it is live. There are no preset questions or canned hints.
 
-Screenshot OCR uses Tesseract.js in a browser worker and needs no API key. It is intended for printed English and simple algebra. Fractions, exponents, diagrams, and handwriting can need manual correction. Nothing is uploaded for OCR. While a tutor session is active, the tutor can request an image of the visible whiteboard (pasted image, text and original pen strokes) through LiveKit and send it to OpenAI for visual understanding. No desktop screen sharing is used. MyScript handwriting conversion and LiveKit/OpenAI voice still require their own provider configuration. Reload clears the visit.
+Screenshot OCR uses Tesseract.js in a browser worker and needs no API key. It is intended for printed English and simple algebra. Fractions, exponents, diagrams, and handwriting can need manual correction. Nothing is uploaded for OCR. While a tutor session is active, canvas snapshots (pasted image, text and original pen strokes) travel through LiveKit to the configured voice/vision provider: Gemini by default, or the optional OpenAI path. No desktop screen sharing is used. MyScript handwriting conversion and live voice require their own provider configuration. Reload clears the visit.
 
 Visualize is limited to **single-object kinematics**: speeding up, braking to rest, constant speed, and downward free fall. Paste a problem as plain text onto the canvas, select the resulting textbox, then click **Visualize** to see the modal. Every pasted problem, including the [demo examples](docs/DEMO_PROBLEMS.md), uses OpenRouter extraction. The examples guide the model; there is no preset matching or offline fallback. The API identifies the object and known quantities, and the backend validates units and motion before calculating frames. Configure `OPENROUTER_API_KEY` in `backend/.env`; `OPENROUTER_VISUALIZATION_MODEL` selects the model. Each click makes one bounded API call. Multiple-object collisions, direction changes, and unknown launch-speed constraints are unsupported.
 
@@ -72,6 +72,10 @@ The backend may keep running in Docker. The frontend uses `/token` for voice, `/
 
 For voice, also install `agent/requirements.txt`, configure `agent/.env` using `agent/.env.example`, and run `python main.py dev` from `agent/`. The Python LiveKit worker is a separate process, not a Compose service. Press the Mimir orb to start a voice session with or without a pasted question; the chip's text is added to the tutor context when available and edits update it live. Replacing a screenshot keeps the session alive.
 
+The backend and worker must use the same `LIVEKIT_AGENT_NAME` (default `mimir-tutor`). Each voice token explicitly requests that worker. When teammates share a LiveKit project, use a different name for each developer's backend/worker pair so requests reach the intended checkout. Restart both processes after changing this setting; restarting only Next.js does not restart the Python worker. One agent process stays warm between connections. Startup waits for the tutor to be ready, retries once in a fresh room after failure, and can be cancelled by pressing the orb again.
+
+You can ask Mimir to check while still writing. The request waits until the pen has been up for one second; more writing resets that pause. Changes during checking trigger a fresh snapshot automatically. Stop, Pause, a new question, or ending the conversation cancels the pending check. Tutor steps animate as handwritten SVG strokes below the working column, avoiding existing content. Calm motion skips the drawing animation. Pen inactivity is a timing signal, not proof that a solution is complete.
+
 ## OCR assets
 
 `npm run dev` and `npm run build` copy the installed OCR worker, WASM cores, and English data into `frontend/public/ocr/`. These generated files are ignored by Git and ESLint. The browser loads them from the app itself. Docker copies the generated assets into the production image. No CDN request is needed at runtime.
@@ -101,21 +105,38 @@ Kinematics regression checks (including 200 generated question/animation pairs):
 docker compose exec -T backend python -m unittest test_kinematics -v
 ```
 
+## Gemini Live tutoring (default)
+
+Mimir uses one standard **Gemini 3.8 Live** session for listening, canvas vision, tutoring and speech. It does not call a separate OpenAI planner or text-to-speech service. Use the existing LiveKit transport and configure the ignored `agent/.env`:
+
+```dotenv
+TUTOR_PROVIDER=gemini
+GOOGLE_API_KEY=your-local-key
+GEMINI_LIVE_MODEL=gemini-3.8-live
+GEMINI_VOICE=Puck
+```
+
+Install `agent/requirements.txt`, keep the existing LiveKit credentials and matching `LIVEKIT_AGENT_NAME`, then restart the Python worker and start a fresh orb conversation. Google credentials stay on the server. Standard Gemini Live does not accept a thinking configuration; Extended Thinking is a different integration and is not selected here.
+
+Changed, settled canvas frames reach the session silently, at most once per second. The existing one-second pen-up gate prevents partial strokes from being reviewed. An unchanged frame is reused, and a new frame's state and image are fetched concurrently and checked against the same board revision. The confirmed question and last interpreted problem remain available when panning below the question.
+
+Gemini can call `review_step` directly from the current frame. It does not need a separate model-requested inspection first. The tool waits for settled ink, validates arithmetic/algebra locally, and applies a teaching plan atomically against the current snapshot. A cached review uses one freshness RPC and the annotation RPC. New writing rejects stale plans. The model must reread changed work before approving it. These checks reduce errors but cannot guarantee correct handwriting interpretation or every spoken claim.
+
+Explicit typed board requests wait before generation. Voice requests acknowledged without an inspection receive one queued completion after the native response and pen settling. New input, Pause and disconnect cancel pending checks. Native interruptions use LiveKit's cancellable tools and speech handles; synthetic speech-start events for tool continuations are not treated as new student input. Physical microphone/noise and iPad testing remain necessary.
+
 ## Inline voice and learning support
 
 Learning tools in the header adjusts captions, reading size/spacing, motion and teaching pace. The orb starts a conversation; Use keyboard starts without requesting microphone access. The compact voice dock has Next hint, Read question, another explanation, typed messages, microphone mute and pause/resume.
 
-During an active tutor session, the agent prepares one checked hint after the visible board settles. A cheap revision check lets ordinary hint requests reuse it; edits, focus, viewport changes and pause invalidate preparation. Unchanged images and their region IDs are cached. Preparation uses the Responses API (`TUTOR_REASONING_MODEL`, default `gpt-5.4-mini`; `TUTOR_REASONING_EFFORT`, default `low`). Specific or ambiguous questions still use the full planner, while unambiguous short answers to a grounded numeric subexpression can be checked locally. A bounded AST/Fraction checker verifies basic arithmetic, polynomial identities and linear equation transformations without executing generated code. This reduces errors; it is not a guarantee of mathematical or visual accuracy.
+Use **Focus a problem** to drag around the problem and working area when several questions share the board. The tutor receives a crop of that area. Without focus it sees the current viewport and asks which problem when ambiguous. Temporary emphasis recolors selected ink/text/image symbols; source content stays unchanged. After a correct answer it can place one equivalent equation with an animated handwritten blank below existing work. Tutor steps have a remove button. Calm motion skips animation. Drawing failures preserve checked spoken feedback and never imply that vision failed.
 
-Checked lines use streaming speech synthesis (`TUTOR_TTS_MODEL`, default `gpt-4o-mini-tts`; `TUTOR_VOICE`, default `marin`) instead of asking Realtime to generate another answer. Hint audio and eligible confirmation lines are prepared in advance and kept in a bounded in-memory cache. Realtime still handles live audio input and the initial greeting. No new credentials are needed.
+The worker logs image updates, inspection time and checked-tool duration without student content in those measurements. Pen input retains coalesced samples and paints once per animation frame. Handwriting regions are grouped by actual stroke proximity; highlights use source stroke IDs rather than guessed rectangles.
 
-The worker logs the response route, board/preparation wait, model check, annotation, final-transcript delay and speech startup without student content in those measurements. Pen input retains coalesced samples and paints once per animation frame. Handwriting regions are grouped by actual stroke proximity, and highlights recolor selected stroke IDs rather than every stroke inside an overlapping rectangle. See `docs/PROJECT_CONTEXT.md` for measured handwriting checks and device limits.
+Checks: `cd agent && .venv/bin/python -m unittest discover -s tests -v`; `cd backend && .venv/bin/python -m unittest test_voice_token test_kinematics -v`; `cd frontend && node scripts/test-board-support.mjs && node scripts/test-voice-startup.mjs`; frontend lint, TypeScript and production build.
 
-Use **Focus a problem** to drag around the problem and working area when several questions share the board. The tutor receives a crop of that area. Without focus it sees the current viewport and asks which problem when ambiguous. Temporary emphasis recolors visible ink/text/image symbols purple; source content stays unchanged. After a correct answer it can place one equivalent equation with a blank for handwriting in unoccupied space. Tutor steps have a remove button.
+## Optional legacy OpenAI tutoring
 
-Replies are interruptible and microphone audio stays live while the tutor speaks. A speech-start event lasting 150ms cancels pending math and stops speech without waiting for the final transcript. Server VAD retains its .75 activation threshold, noise reduction and 350ms end-of-turn silence. Very brief speech-detection blips are ignored; sustained background speech can still interrupt. Exact stop/repeat/greeting/thanks controls bypass vision. Automatic Realtime math answers remain disabled. Actual room noise and iPad microphone behavior still require device testing. Background preparation is silent, only runs in an active session, waits for settled ink, and starts at most once per four seconds. It does not automatically speak corrections while the student writes.
-
-Checks: `cd agent && .venv/bin/python -m unittest discover -s tests -v`; `cd frontend && node scripts/test-board-support.mjs`; frontend lint, TypeScript and production build.
+`TUTOR_PROVIDER=openai` selects the earlier checked planner/TTS path and requires `OPENAI_API_KEY`. It uses Realtime for input, `TUTOR_REASONING_MODEL` (default `gpt-5.4-mini`, low effort) for visual planning, and `TUTOR_TTS_MODEL` (default `gpt-4o-mini-tts`) for checked speech. It prepares hints on settled revisions, at most once per four seconds, and caches eligible speech. The mode remains available for existing setups; none of these OpenAI calls are made by the default Gemini tutor. Both modes share the bounded AST/Fraction math checker and the same canvas tools.
 
 ## Combined preview branch
 

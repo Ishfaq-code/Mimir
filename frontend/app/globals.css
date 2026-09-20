@@ -337,4 +337,9 @@ button { transition: background-color 160ms ease-out, color 160ms ease-out, opac
 .problem-focus-outline { position:absolute; z-index:3; pointer-events:none; border:1px dashed var(--accent); border-radius:12px; }
 .problem-focus-outline > span { position:absolute; left:10px; top:-10px; padding:2px 7px; background:var(--surface); color:var(--accent); font-size:10px; letter-spacing:.03em; border-radius:6px; }
 .tutor-scaffold { white-space:nowrap; }
+.tutor-handwriting { display:block; overflow:visible; }
+.tutor-pen-stroke { stroke-dasharray:1; stroke-dashoffset:1; animation:tutor-pen-write var(--pen-duration) linear var(--pen-delay) both; }
+@keyframes tutor-pen-write { to { stroke-dashoffset:0; } }
+.tutor-handwriting[data-calm="true"] .tutor-pen-stroke { animation:none; stroke-dashoffset:0; }
+@media (prefers-reduced-motion:reduce) { .tutor-pen-stroke { animation:none; stroke-dashoffset:0; } }
 .tutor-scaffold-dismiss { position:absolute; right:-24px; top:-8px; border:0; background:var(--surface); color:var(--text-muted); width:24px; height:24px; border-radius:50%; pointer-events:auto; font-size:16px; }

@@ -112,7 +112,7 @@ The eight existing ink colors are content choices and retain their literal value
 
 **Body Font:** Geist, Arial, sans-serif.
 
-**Math Font:** Runtime recognized handwriting and tutor math use KaTeX. Imported question text uses the body font; the original screenshot preserves its own typography. Student handwriting remains geometry.
+**Math:** Recognized student math uses KaTeX when Typeset math is enabled. New tutor scaffolds use original SVG pen paths for numbers, letters, operators and raised exponents, with an open underline for the student's answer. Imported question text uses the body font; the original screenshot preserves its own typography. Student handwriting remains geometry. Legacy LaTeX-only annotations retain their existing renderer.
 
 Review headings use 21 px, corrected question text uses 15–16 px, controls use 12–13 px, and compact status uses 10–11 px. Keep question text below 75ch. The textarea is 16 px to avoid small-input zoom on mobile.
 
@@ -185,3 +185,5 @@ Tutor emphasis temporarily paints the selected ink/text/screenshot symbols purpl
 Larger reading text is 20 px; extra spacing uses 1.9 line height and small letter/word spacing. Calm motion disables decorative motion and the aura. System reduced-motion remains honored. No special font or diagnosis label is imposed.
 
 A small **Focus a problem** control below the top line lets students drag a working area. A quiet dashed outline marks that area; the tutor sees its crop. **Checking your work…** appears in the existing caption dock while vision/reasoning runs. Next-step notation uses one empty handwriting space and a remove button, on the existing canvas without a sidebar.
+
+During a requested check, **Waiting for your pen…** occupies that same status line until input has been idle for one second. There is no spoken interruption or new panel. Tutor steps write themselves stroke by stroke in the existing accent color, with a maximum total drawing time of 2.4 seconds. Calm motion and system reduced-motion show the complete step immediately. Steps follow the working column downward and stay anchored in world coordinates during pan and zoom. Existing ink, screenshots, previous tutor steps and graph panels are placement obstacles; the canvas reveals space below when needed.

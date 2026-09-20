@@ -22,7 +22,7 @@ export function registerCanvasRpcs(room: Room, canvas: TutorCanvas): void {
   };
   participant.registerRpcMethod("set_tutor_status", async data => {
     const args = parse(data);
-    if (args.status !== "ready" && args.status !== "checking") throw new RpcError(1400, "Invalid status");
+    if (!["ready", "waiting", "checking"].includes(args.status)) throw new RpcError(1400, "Invalid status");
     setTutorStatus(args.status);
     return JSON.stringify({success:true});
   });
@@ -55,7 +55,7 @@ export function registerCanvasRpcs(room: Room, canvas: TutorCanvas): void {
       throw new RpcError(1409, message);
     });
     // Stroke membership stays local; the tutor only needs stable region IDs.
-    const metadata={...view,regions:view.regions.map(({id,bounds,text})=>({id,bounds,text}))};
+    const metadata={...view,obstacles:undefined,regions:view.regions.map(({id,bounds,text})=>({id,bounds,text}))};
     if (new TextEncoder().encode(JSON.stringify(metadata)).length > 14000) throw new RpcError(1409, "Too much work in view; focus on one problem and try again");
     authorize(data);
     const writer = await participant.streamBytes({ name: "whiteboard.jpg", topic: "mimir.board", mimeType: "image/jpeg", totalSize: blob.size, destinationIdentities: [data.callerIdentity], attributes: { requestId: args.requestId } });
