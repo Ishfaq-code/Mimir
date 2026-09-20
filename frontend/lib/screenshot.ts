@@ -1,5 +1,9 @@
 import type { Worker } from "tesseract.js";
 
+export interface ScreenshotRegion { text: string; x: number; y: number; width: number; height: number }
+const imageRegions = new WeakMap<HTMLImageElement, ScreenshotRegion[]>();
+export const getScreenshotRegions = (image: HTMLImageElement) => imageRegions.get(image) ?? [];
+
 export interface Screenshot {
   id: string;
   url: string;
@@ -62,7 +66,12 @@ export async function readScreenshot(screenshot: Screenshot, signal: AbortSignal
         context.fillStyle = "white";
         context.fillRect(0, 0, canvas.width, canvas.height);
         context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        const { data } = await worker.recognize(canvas);
+        const { data } = await worker.recognize(canvas, {}, { text: true, blocks: true });
+        if (!signal.aborted && !finished) {
+          imageRegions.set(image, (data.blocks ?? []).flatMap(block => block.paragraphs.flatMap(paragraph => paragraph.lines.flatMap(line => line.words.flatMap(word =>
+            (word.symbols?.length ? word.symbols : [word]).map(symbol => ({ text: symbol.text, x: symbol.bbox.x0 / canvas.width, y: symbol.bbox.y0 / canvas.height, width: (symbol.bbox.x1 - symbol.bbox.x0) / canvas.width, height: (symbol.bbox.y1 - symbol.bbox.y0) / canvas.height }))
+          )))).slice(0, 300));
+        }
         resolve(data.text.trim());
       })().catch(reject);
     });

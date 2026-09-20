@@ -208,7 +208,20 @@ export default function GraphOverlay({
   onResize,
 }: GraphOverlayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [viewport, setViewport] = useState<MathViewport>(DEFAULT_VIEWPORT);
+  const [viewport, setViewport] = useState<MathViewport>(() => {
+    try {
+      const expression = latexToExpr(graph.latex);
+      const variables = Object.fromEntries(extractVariables(expression).map(name => [name, 1]));
+      const initialPoints = computeCurve(expression, variables, DEFAULT_VIEWPORT.xMin, DEFAULT_VIEWPORT.xMax, CURVE_STEPS);
+      const values = initialPoints.filter((point): point is [number, number] => point !== null).map(point => point[1]);
+      if (!values.length) return DEFAULT_VIEWPORT;
+      const min = Math.min(...values), max = Math.max(...values);
+      const padding = Math.max(1, (max - min) * 0.15);
+      return { ...DEFAULT_VIEWPORT, yMin: min - padding, yMax: max + padding };
+    } catch {
+      return DEFAULT_VIEWPORT;
+    }
+  });
   const [ready, setReady] = useState(false);
   const progressRef = useRef(0);
   const animIdRef = useRef<number | undefined>(undefined);
@@ -248,26 +261,10 @@ export default function GraphOverlay({
     }
   }, [expr, parsed.error, sliderValues, viewport.xMin, viewport.xMax]);
 
-  // Auto-fit Y range — only on first render or when expression changes
-  const hasAutoFit = useRef(false);
-  useEffect(() => {
-    hasAutoFit.current = false;
-  }, [expr]);
-  useEffect(() => {
-    if (hasAutoFit.current) return;
-    const yVals = points.filter((p): p is [number, number] => p !== null).map((p) => p[1]);
-    if (yVals.length === 0) return;
-    hasAutoFit.current = true;
-    const minY = Math.min(...yVals);
-    const maxY = Math.max(...yVals);
-    const pad = Math.max(1, (maxY - minY) * 0.15);
-    setViewport((v) => ({ ...v, yMin: minY - pad, yMax: maxY + pad }));
-  }, [points, expr]);
-
   // Store latest draw inputs in refs so the animation loop and redraw
   // always read current values without restarting the animation.
   const drawStateRef = useRef({ viewport, points, dark });
-  drawStateRef.current = { viewport, points, dark };
+  useEffect(() => { drawStateRef.current = { viewport, points, dark }; }, [viewport, points, dark]);
 
   const redraw = useCallback(() => {
     const cvs = canvasRef.current;
@@ -288,9 +285,9 @@ export default function GraphOverlay({
   useEffect(() => {
     progressRef.current = 0;
     const start = performance.now();
-    setReady(true);
 
     const animate = (now: number) => {
+      if (progressRef.current === 0) setReady(true);
       const elapsed = now - start;
       progressRef.current = Math.min(1, easeOutCubic(Math.min(1, elapsed / TRACE_DURATION)));
       redraw();
@@ -313,7 +310,9 @@ export default function GraphOverlay({
   // Scroll to zoom, Shift+scroll to pan — native listener so preventDefault works
   const containerRef = useRef<HTMLDivElement>(null);
   const wheelStateRef = useRef({ graphW: graph.w, graphH: graph.h, cameraZoom: camera.zoom });
-  wheelStateRef.current = { graphW: graph.w, graphH: graph.h, cameraZoom: camera.zoom };
+  useEffect(() => {
+    wheelStateRef.current = { graphW: graph.w, graphH: graph.h, cameraZoom: camera.zoom };
+  }, [graph.w, graph.h, camera.zoom]);
 
   useEffect(() => {
     const el = containerRef.current;

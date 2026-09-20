@@ -1,39 +1,86 @@
+import asyncio
 import json
+import uuid
 
+from livekit import rtc
 from livekit.agents import get_job_context
 from livekit.agents.llm import ToolError
 
 
 class CanvasRpc:
-    """Forwards canvas operations to the student's browser via LiveKit RPC.
+    """Scoped browser RPC plus bounded, request-correlated whiteboard image streams."""
 
-    The browser owns the canvas, so every tool call becomes a frontend RPC
-    (spec.md section 8). RPC failures raise ToolError so the model is told
-    the visual action did not happen and must not claim it did.
-    """
+    def __init__(self, student_identity: str):
+        self.room = get_job_context().room
+        self.student_identity = student_identity
+        self.pending: dict[str, asyncio.Future[bytes]] = {}
+        self.tasks: set[asyncio.Task] = set()
+        self.room.register_byte_stream_handler("mimir.board", self._image_received)
 
-    async def get_canvas_state(self) -> dict:
-        raw = await self._rpc("get_canvas_state", {})
-        return json.loads(raw) if raw else {}
+    def _image_received(self, reader: rtc.ByteStreamReader, identity: str):
+        request_id = (reader.info.attributes or {}).get("requestId")
+        future = self.pending.get(request_id)
+        if identity != self.student_identity or future is None or future.done():
+            reader.close()
+            return
 
-    async def write_latex(self, latex: str, x: float, y: float) -> dict:
-        raw = await self._rpc("write_latex", {"latex": latex, "x": x, "y": y})
-        return json.loads(raw) if raw else {"success": False, "error": "empty_response"}
+        async def consume():
+            try:
+                async with asyncio.timeout(10):
+                    image = bytearray()
+                    async for chunk in reader:
+                        image.extend(chunk)
+                        if len(image) > 1_500_000:
+                            raise ValueError("Board image exceeds limit")
+                    if not image.startswith(b"\xff\xd8"):
+                        raise ValueError("Expected a JPEG board image")
+                    if not future.done():
+                        future.set_result(bytes(image))
+            except Exception as error:
+                if not future.done():
+                    future.set_exception(error)
+            finally:
+                reader.close()
 
-    async def _rpc(self, method: str, payload: dict) -> str:
-        room = get_job_context().room
-        identities = list(room.remote_participants.keys())
-        if not identities:
-            # No student in the room: nothing can execute the action.
+        task = asyncio.create_task(consume())
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+
+    async def capture(self) -> tuple[dict, bytes]:
+        request_id = uuid.uuid4().hex
+        future = asyncio.get_running_loop().create_future()
+        self.pending[request_id] = future
+        try:
+            async with asyncio.timeout(15):
+                view = await self.call("capture_board", {"requestId": request_id}, timeout=12)
+                image = await future
+                return view, image
+        except Exception as error:
+            raise ToolError("Could not see the board. Ask the student to finish their stroke or bring the work into view, then retry.") from error
+        finally:
+            self.pending.pop(request_id, None)
+            if not future.done():
+                future.cancel()
+            elif not future.cancelled():
+                future.exception()  # consume any stream error if the RPC failed first
+
+    async def call(self, method: str, payload: dict, timeout: float = 5) -> dict:
+        if self.student_identity not in self.room.remote_participants:
             raise ToolError("The student is not connected right now.")
         try:
-            return await room.local_participant.perform_rpc(
-                destination_identity=identities[0],
-                method=method,
-                payload=json.dumps(payload),
-                response_timeout=5.0,
+            raw = await self.room.local_participant.perform_rpc(
+                destination_identity=self.student_identity, method=method,
+                payload=json.dumps(payload), response_timeout=timeout,
             )
-        except ToolError:
-            raise
-        except Exception as e:
-            raise ToolError(f"Canvas RPC '{method}' failed: {type(e).__name__}") from e
+            return json.loads(raw) if raw else {}
+        except Exception as error:
+            raise ToolError(f"Canvas action {method} did not complete: {type(error).__name__}") from error
+
+    async def close(self):
+        self.room.unregister_byte_stream_handler("mimir.board")
+        for future in self.pending.values():
+            future.cancel()
+        tasks = list(self.tasks)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)

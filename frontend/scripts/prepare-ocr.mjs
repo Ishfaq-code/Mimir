@@ -4,7 +4,10 @@ import { dirname, resolve } from "node:path";
 
 const require = createRequire(import.meta.url);
 const destination = resolve(import.meta.dirname, "../public/ocr");
-const core = dirname(require.resolve("tesseract.js-core/package.json"));
+// resolve tesseract.js-core from tesseract.js's own context so this works
+// under both npm's flat layout and pnpm's symlinked layout
+const tesseractDir = dirname(require.resolve("tesseract.js/package.json"));
+const core = dirname(require.resolve("tesseract.js-core/package.json", { paths: [tesseractDir] }));
 await mkdir(`${destination}/core`, { recursive: true });
 await mkdir(`${destination}/lang`, { recursive: true });
 await copyFile(require.resolve("tesseract.js/dist/worker.min.js"), `${destination}/worker.min.js`);

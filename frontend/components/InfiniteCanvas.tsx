@@ -17,6 +17,10 @@ import type {
 } from "@/lib/canvas/types";
 import { DEFAULT_STYLE, pointXY } from "@/lib/canvas/types";
 import { renderScene, type CanvasScreenshot } from "@/lib/canvas/renderer";
+import { captureScene, snapToInk } from "@/lib/canvas/capture";
+import { registerBoardSource, clearHighlight, getHighlight, subscribeHighlight, getFocus } from "@/lib/tutor/boardView";
+import { getPreferences, subscribeSupport } from "@/lib/tutor/support";
+import { getCanvasState } from "@/lib/tutor/store";
 import type { Screenshot } from "@/lib/screenshot";
 import {
   clearRecognizedEquations,
@@ -26,6 +30,7 @@ import {
 } from "@/lib/tutor/store";
 import IslandToolbar from "./IslandToolbar";
 import Icon from "./Icon";
+import ProblemFocus from "./ProblemFocus";
 import TutorOverlay from "./TutorOverlay";
 import CanvasTextEditor, { type TextDraft } from "./CanvasTextEditor";
 import GraphOverlay, { type GraphInstance } from "./GraphOverlay";
@@ -205,14 +210,15 @@ const RECOGNITION_PAUSE_MS = Number(process.env.NEXT_PUBLIC_RECOGNITION_PAUSE_MS
 interface InfiniteCanvasProps {
   dark: boolean;
   screenshot: Screenshot | null;
-  confirmedQuestion: string | null;
+  questionText: string | null;
   onVisualizeRequest: (problem: string) => void;
 }
 
-export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, onVisualizeRequest }: InfiniteCanvasProps) {
+export default function InfiniteCanvas({ dark, screenshot, questionText, onVisualizeRequest }: InfiniteCanvasProps) {
   // ── refs ────────────────────────────────────────────────────────
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const renderFrameRef = useRef<number | null>(null);
 
   const elementsRef = useRef<CanvasElement[]>([]);
   const screenshotRef = useRef<CanvasScreenshot | null>(null);
@@ -329,7 +335,7 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
   }, []);
 
   // ── render ──────────────────────────────────────────────────────
-  const render = useCallback(() => {
+  const paint = useCallback(() => {
     const ctx = ctxRef.current;
     const cvs = canvasRef.current;
     if (!ctx || !cvs) return;
@@ -339,8 +345,45 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
     const latexStrokeIds = new Set(
       Object.values(latexOverlaysRef.current).flatMap((o) => o.strokeIds),
     );
-    renderScene(ctx, cvs.width / dpr, cvs.height / dpr, elementsRef.current, selectedRef.current, cameraRef.current, darkRef.current, hiddenIds, screenshotRef.current, selectedScreenshotRef.current, marqueeRef.current, [], latexStrokeIds);
+    renderScene(ctx, cvs.width / dpr, cvs.height / dpr, elementsRef.current, selectedRef.current, cameraRef.current, darkRef.current, hiddenIds, screenshotRef.current, selectedScreenshotRef.current, marqueeRef.current, [], getPreferences().highlights ? getHighlight() : null, latexStrokeIds);
   }, []);
+
+  // Pencil events can arrive faster than the display refreshes. Keep every ink
+  // sample, but paint the board only once per frame.
+  const render = useCallback(() => {
+    if (renderFrameRef.current !== null) return;
+    renderFrameRef.current = requestAnimationFrame(() => {
+      renderFrameRef.current = null;
+      paint();
+    });
+  }, [paint]);
+  useEffect(() => () => {
+    if (renderFrameRef.current !== null) cancelAnimationFrame(renderFrameRef.current);
+    renderFrameRef.current = null;
+  }, []);
+
+  useEffect(() => subscribeHighlight(render), [render]);
+  useEffect(() => subscribeSupport(render), [render]);
+
+  function sceneRevision() {
+    const shot = screenshotRef.current;
+    const value = JSON.stringify([elementsRef.current, shot && [shot.image.src, shot.x, shot.y, shot.width, shot.height], getCanvasState().question, getCanvasState().tutorAnnotations, getFocus(), cameraRef.current, canvasRef.current?.clientWidth, canvasRef.current?.clientHeight]);
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619);
+    return (hash >>> 0).toString(36);
+  }
+
+  useEffect(() => registerBoardSource({
+    revision: sceneRevision,
+    isBusy: () => actionRef.current.type !== "none" || !!textDraftRef.current,
+    hasContent: () => !!screenshotRef.current || elementsRef.current.some(el=>!el.isDeleted),
+    capture: () => {
+      if (actionRef.current.type !== "none" || textDraftRef.current) return Promise.reject(new Error("Student is writing; try again after they finish"));
+      const rect = canvasRef.current!.getBoundingClientRect();
+      return captureScene(elementsRef.current, screenshotRef.current, { ...cameraRef.current }, rect.width, rect.height, darkRef.current, sceneRevision());
+    },
+    snap: bounds => snapToInk(bounds, elementsRef.current),
+  }), []);
 
   const updateStyle = useCallback((u: Partial<ElementStyle>) => {
     const next = { ...styleRef.current, ...u };
@@ -595,6 +638,7 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
 
   // ── history ─────────────────────────────────────────────────────
   const pushHistory = useCallback(() => {
+    clearHighlight();
     const h = historyRef.current;
     h.length = histIdxRef.current + 1;
     h.push(cloneElements(elementsRef.current));
@@ -618,6 +662,7 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
 
   const undo = useCallback(() => {
     if (histIdxRef.current <= 0) return;
+    clearHighlight();
     histIdxRef.current--;
     elementsRef.current = cloneElements(historyRef.current[histIdxRef.current]);
     selectedRef.current.clear();
@@ -638,6 +683,7 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
   const redo = useCallback(() => {
     const h = historyRef.current;
     if (histIdxRef.current >= h.length - 1) return;
+    clearHighlight();
     histIdxRef.current++;
     elementsRef.current = cloneElements(h[histIdxRef.current]);
     selectedRef.current.clear();
@@ -846,15 +892,19 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
         const pts = (el as LinearElement).points;
         pts[pts.length - 1] = [wp.x - el.x, wp.y - el.y];
       } else if (el.type === "freedraw") {
-        (el as FreedrawElement).points.push({ x: wp.x - el.x, y: wp.y - el.y, t: performance.now() });
+        const coalesced = e.nativeEvent.getCoalescedEvents?.() ?? [];
+        const samples = coalesced.length ? coalesced : [e.nativeEvent];
+        const rect = canvasRef.current!.getBoundingClientRect();
         const recognitionStroke = recognitionStrokesRef.current[el.id];
-        recognitionStroke?.push({
-          x: wp.x,
-          y: wp.y,
-          t: Date.now(),
-          p: e.pressure > 0 ? e.pressure : 0.5,
-          pointerType: e.pointerType || "mouse",
-        });
+        for (const sample of samples) {
+          const point = screenToWorld(sample.clientX - rect.left, sample.clientY - rect.top, cam);
+          (el as FreedrawElement).points.push({ x: point.x - el.x, y: point.y - el.y, t: sample.timeStamp });
+          recognitionStroke?.push({
+            x: point.x, y: point.y, t: performance.timeOrigin + sample.timeStamp,
+            p: sample.pressure > 0 ? sample.pressure : 0.5,
+            pointerType: sample.pointerType || "mouse",
+          });
+        }
       }
       render();
     } else if (act.type === "moving") {
@@ -989,6 +1039,7 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
       if (el?.type === "freedraw" && !el.isDeleted) scheduleRecognition(el.id);
     }
 
+    if (act.type === "resizing") clearHighlight();
     if (act.type === "moving" || act.type === "erasing" || (act.type === "resizing" && act.target !== SCREENSHOT_ID)) pushHistory();
     if (act.type === "erasing") { erasingRef.current = false; setErasing(false); }
     if (act.type === "marquee") marqueeRef.current = null;
@@ -1069,7 +1120,7 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
       const width = Math.max(10, ...lines.map(line => ctx.measureText(line).width));
       ctx.restore();
       elementsRef.current.push({ id: genId(), type: "text", x: camera.x + 32 / camera.zoom,
-        y: camera.y + 76 / camera.zoom, width, height: lines.length * fontSize * 1.2,
+        y: camera.y + 112 / camera.zoom, width, height: lines.length * fontSize * 1.2,
         text: lines.join("\n"), fontSize, style: { ...styleRef.current }, isDeleted: false });
       selectedRef.current.clear();
       selectedScreenshotRef.current = false;
@@ -1085,9 +1136,9 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
     const selectedText = elementsRef.current.find((element): element is TextElement =>
       selectedRef.current.has(element.id) && element.type === "text" && !element.isDeleted,
     );
-    const problem = selectedText?.text.trim() || (selectedScreenshotRef.current ? confirmedQuestion?.trim() : "");
+    const problem = selectedText?.text.trim() || (selectedScreenshotRef.current ? questionText?.trim() : "");
     onVisualizeRequest(problem || "");
-  }, [confirmedQuestion, onVisualizeRequest]);
+  }, [questionText, onVisualizeRequest]);
 
   // ── effects ─────────────────────────────────────────────────────
 
@@ -1105,7 +1156,7 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
     const image = screenshot.image;
     const scale = Math.min(1, Math.max(120, bounds.width - 64) / image.naturalWidth, Math.max(100, bounds.height * .42) / image.naturalHeight);
     screenshotRef.current = {
-      image, x: camera.x + 32 / camera.zoom, y: camera.y + 76 / camera.zoom,
+      image, x: camera.x + 32 / camera.zoom, y: camera.y + 112 / camera.zoom,
       width: image.naturalWidth * scale / camera.zoom,
       height: image.naturalHeight * scale / camera.zoom,
     };
@@ -1332,9 +1383,10 @@ export default function InfiniteCanvas({ dark, screenshot, confirmedQuestion, on
 
       {/* ── tutor layer (recognized math + tutor annotations) ─── */}
       <TutorOverlay camera={overlayCamera} />
+      <ProblemFocus camera={overlayCamera} />
 
       {graphs.map((graph) => (
-        <GraphOverlay key={graph.id} graph={graph} camera={overlayCamera} dark={dark} onClose={() => closeGraph(graph.id)} onMove={moveGraph} onResize={resizeGraph} />
+        <GraphOverlay key={`${graph.id}:${graph.latex}`} graph={graph} camera={overlayCamera} dark={dark} onClose={() => closeGraph(graph.id)} onMove={moveGraph} onResize={resizeGraph} />
       ))}
 
       <div className="canvas-topline">

@@ -1,3 +1,4 @@
+import type { BoardHighlight } from "../tutor/boardView";
 import type {
   Camera,
   CanvasElement,
@@ -33,6 +34,7 @@ export function renderScene(
   selectedScreenshot = false,
   marquee: { x: number; y: number; w: number; h: number } | null = null,
   selectedLatexBounds: { x: number; y: number; w: number; h: number }[] = [],
+  highlight: BoardHighlight | null = null,
   latexStrokeIds: Set<string> = new Set(),
 ) {
   ctx.save();
@@ -58,6 +60,37 @@ export function renderScene(
     if (el.isDeleted || hiddenIds.has(el.id)) continue;
     ctx.save();
     drawElement(ctx, el);
+    ctx.restore();
+  }
+
+  if (highlight) {
+    const color = dark ? "#b6a2ff" : "#7954d6";
+    const strokeIds = highlight.strokeIds && new Set(highlight.strokeIds);
+    if (strokeIds) for (const el of elements) {
+      if (el.isDeleted || hiddenIds.has(el.id) || !strokeIds.has(el.id)) continue;
+      ctx.save();ctx.shadowColor=color;ctx.shadowBlur=5;
+      drawElement(ctx,{...el,style:{...el.style,strokeColor:color}});
+      ctx.restore();
+    }
+    const boxes = highlight.nonInkRegions ?? highlight.regions ?? [highlight.bounds];
+    ctx.save();
+    ctx.beginPath();
+    for (const b of boxes) ctx.rect(b.x-2,b.y-2,Math.max(4,b.width+4),Math.max(4,b.height+4));
+    ctx.clip();
+    if (screenshot) {
+      const tinted = tintScreenshot(screenshot.image, dark);
+      if (tinted) ctx.drawImage(tinted,screenshot.x,screenshot.y,screenshot.width,screenshot.height);
+    }
+    for (const el of elements) {
+      if (el.isDeleted || hiddenIds.has(el.id) || (strokeIds && el.type==="freedraw")) continue;
+      const b = normBounds(el);
+      const padding = el.style.strokeWidth + 4;
+      if (!boxes.some(box => b.x + b.w + padding >= box.x && b.x - padding <= box.x + box.width && b.y + b.h + padding >= box.y && b.y - padding <= box.y + box.height)) continue;
+      ctx.save();
+      ctx.shadowColor = color; ctx.shadowBlur = 5;
+      drawElement(ctx, {...el,style:{...el.style,strokeColor:color}});
+      ctx.restore();
+    }
     ctx.restore();
   }
 
@@ -107,15 +140,16 @@ function drawGrid(
   const ex = cam.x + w / cam.zoom;
   const ey = cam.y + h / cam.zoom;
 
+  ctx.beginPath();
   for (let wx = sx; wx <= ex; wx += GRID_SIZE) {
     for (let wy = sy; wy <= ey; wy += GRID_SIZE) {
       const px = (wx - cam.x) * cam.zoom;
       const py = (wy - cam.y) * cam.zoom;
-      ctx.beginPath();
+      ctx.moveTo(px + r, py);
       ctx.arc(px, py, r, 0, Math.PI * 2);
-      ctx.fill();
     }
   }
+  ctx.fill();
 }
 
 // ── element dispatch ────────────────────────────────────────────────
@@ -311,4 +345,34 @@ function normBounds(el: CanvasElement) {
     h = -h;
   }
   return { x, y, w, h };
+}
+
+// Recolor foreground pixels only; preserve paper/background and original image.
+const tintCache = new WeakMap<HTMLImageElement, Map<boolean, HTMLCanvasElement>>();
+function tintScreenshot(image: HTMLImageElement, dark: boolean): HTMLCanvasElement | null {
+  const cached=tintCache.get(image)?.get(dark);
+  if (cached) return cached;
+  const out=document.createElement("canvas");
+  out.width=image.naturalWidth; out.height=image.naturalHeight;
+  const ctx=out.getContext("2d"); if(!ctx) return null;
+  try {
+    ctx.drawImage(image,0,0);
+    const pixels=ctx.getImageData(0,0,out.width,out.height), d=pixels.data;
+    // Decide polarity from border pixels so light ink on dark images also works.
+    let light=0, samples=0;
+    const stride=Math.max(1,Math.floor(out.width/32));
+    for(let x=0;x<out.width;x+=stride) for(const y of [0,out.height-1]) {
+      const i=(y*out.width+x)*4;light+=(d[i]+d[i+1]+d[i+2])/3;samples++;
+    }
+    const paperLight=light/Math.max(1,samples)>128;
+    const rgb=dark?[182,162,255]:[121,84,214];
+    for(let i=0;i<d.length;i+=4){
+      const lum=(d[i]*.2126+d[i+1]*.7152+d[i+2]*.0722);
+      const foreground=paperLight?lum<170:lum>110;
+      if(foreground){d[i]=rgb[0];d[i+1]=rgb[1];d[i+2]=rgb[2];}
+    }
+    ctx.putImageData(pixels,0,0);
+    const entry=tintCache.get(image)??new Map();entry.set(dark,out);tintCache.set(image,entry);
+    return out;
+  } catch { return null; }
 }

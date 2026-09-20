@@ -42,12 +42,14 @@ The current hackathon visit is held in memory: reload loses drawings and questio
 | Guidance | A short question or hint connected to the relevant handwritten expression. |
 | Annotation | Circle/highlight the relevant ink; the user suggested a glow lasting about three seconds while the tutor speaks. |
 | Demonstration | Explain step by step when needed; tutor-written math should appear to draw itself. |
-| Problem source | Paste a screenshot onto the canvas. OCR it, ask the student to confirm or correct the question, and use only confirmed screenshot text as problem context for the tutor. Plain-text paste creates a selectable canvas textbox for visualization. |
+| Problem source | Paste a screenshot onto the canvas. OCR it and show the read text in a small dismissible chip near the Mimir orb; edits update tutor context live. Explicit confirmation was replaced by this passive chip on 2026-09-20. Other input methods come later. |
 | Completion | Help the student reach a correct answer. |
 | Constraints | Fast hackathon iteration, reuse existing tools/APIs when useful, approximately $20 total API budget. |
 | Kinematics visualization | Interpret pasted single-object problems through an API and calculate matching, validated visualizations: speeding up, braking to rest, constant speed, and downward free fall. Multiple bodies, collisions, direction reversals, and unknown launch-speed constraints are outside this visualization scope. |
 
-Students may also paste a plain-text problem onto the canvas, select its textbox, and open Visualize. Kinematics visualization uses an API to interpret each pasted problem, including the copyable demo examples. Examples guide interpretation rather than trigger pre-programmed answers; validated physics calculates the frames. Premade kinematics questions are copyable demo material, not a question selector. The screenshot flow supersedes the earlier preset algebra questions. Keep interface copy limited to necessary controls, review prompts, and actionable status/errors. Typing is allowed for OCR corrections and optional canvas textboxes. Freehand math remains the main solving interaction.
+Students may also paste a plain-text problem onto the canvas, select its textbox, and open Visualize. Kinematics visualization uses an API to interpret each pasted problem, including the copyable demo examples. Examples guide interpretation rather than trigger pre-programmed answers; validated physics calculates the frames. Premade kinematics questions are copyable demo material, not a question selector.
+
+The screenshot flow supersedes the earlier preset algebra questions. Keep interface copy limited to necessary controls, chip status, and actionable errors. Typing is allowed for chip corrections and optional canvas textboxes. Freehand math remains the main solving interaction. The tutor is invoked as **Mimir**: a single orb starts and ends the voice session, with a screen-edge aura while it is live.
 
 The original time budget was 24 hours. That was a historical constraint, not a live countdown. No sponsor requirements were specified.
 
@@ -94,7 +96,7 @@ These are product constraints from the conversation, not a newly imposed aesthet
 
 Confirmed interaction needs are handwriting with an Apple Pencil, spoken help, and a visible indication of the expression being discussed. Preserve readable ink and controls in both currently supported system themes.
 
-No formal accessibility standard or additional individual accommodation was specified. Visible transcripts, non-color annotation cues, accessible control names, comfortable touch targets, and reduced-motion alternatives are recommended future requirements, not verified features. Do not claim the current interface meets an accessibility conformance level.
+The workspace now includes a Learning tools popover with live captions, one-step guidance, short replies, slower speech, larger text, wider text spacing, calm motion and temporary expression color emphasis. A compact caption dock supports typed messages, reading the question aloud, another explanation, microphone control and pause/resume. These are student-selected preferences, not diagnosis-specific modes or claims of clinical benefit. No formal accessibility conformance level or physical iPad verification is claimed.
 
 ## Decisions Still Open
 
@@ -104,3 +106,5 @@ No formal accessibility standard or additional individual accommodation was spec
 - Durable persistence, full voice/recognition validation on iPad, and general visual explanations. Screenshot OCR currently targets printed English questions and basic algebra; complex mathematical layout may need correction.
 
 Implementation facts and a suggested build order live in [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md). Visual values extracted from the current app live in [DESIGN.md](DESIGN.md).
+
+Reliability and latency refinement (2026-09-20): math teaching uses versioned visual evidence and a checked plan. During an active session the tutor silently prepares a hint after handwriting settles, reusing it only while the board remains unchanged. Hints and eligible numeric answers can respond without another model call; specific or ambiguous requests still require fresh planning. Checked words are delivered directly through speech synthesis, with prepared audio cached in memory. Multiple problems can be isolated with a drag-to-focus area. Correct answers can advance to a single equivalent equation with a handwriting blank; incorrect or ambiguous work stays at the current step. Basic arithmetic/algebra checks are deterministic, while visual interpretation and teaching judgments remain model-dependent. Speech-start detection stops audio and cancels a pending turn; brief blips are ignored. No continuous proactive error correction or device-level noise guarantee is claimed.

@@ -25,7 +25,7 @@ app = FastAPI(title="Mimir API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -214,10 +214,12 @@ async def create_visualization(request: VisualizationRequest) -> VisualizationRe
 
 
 @app.get("/token")
-def get_token(room: str = "mimir-tutor") -> dict[str, str]:
+def get_token(room: str | None = None) -> dict[str, str]:
     """Mint a short-lived LiveKit access token for a student joining `room`.
 
     The browser never sees LiveKit API credentials — only this endpoint does.
+    Without an explicit room, a fresh unique name is generated so every voice
+    session gets its own room and reliably triggers agent dispatch.
     """
     url = os.getenv("LIVEKIT_URL")
     api_key = os.getenv("LIVEKIT_API_KEY")
@@ -231,6 +233,7 @@ def get_token(room: str = "mimir-tutor") -> dict[str, str]:
             ),
         )
 
+    room = room or f"mimir-tutor-{uuid.uuid4().hex[:6]}"
     identity = f"student-{uuid.uuid4().hex[:8]}"
     token = (
         api.AccessToken(api_key, api_secret)
