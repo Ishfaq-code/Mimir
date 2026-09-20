@@ -72,6 +72,53 @@ function hitTest(elements: CanvasElement[], wx: number, wy: number) {
   return null;
 }
 
+const SCREENSHOT_ID = "__screenshot__";
+
+function screenshotBounds(screenshot: CanvasScreenshot) {
+  return { x: screenshot.x, y: screenshot.y, w: screenshot.width, h: screenshot.height };
+}
+
+function pointInBounds(point: { x: number; y: number }, bounds: { x: number; y: number; w: number; h: number }, pad = 0) {
+  return point.x >= bounds.x - pad && point.x <= bounds.x + bounds.w + pad && point.y >= bounds.y - pad && point.y <= bounds.y + bounds.h + pad;
+}
+
+function normalizedRect(a: { x: number; y: number }, b: { x: number; y: number }) {
+  return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) };
+}
+
+function overlaps(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) {
+  return a.x <= b.x + b.w && a.x + a.w >= b.x && a.y <= b.y + b.h && a.y + a.h >= b.y;
+}
+
+type ResizeHandle = "nw" | "ne" | "sw" | "se";
+
+function resizeBounds(start: { x: number; y: number; w: number; h: number }, handle: ResizeHandle, pointer: { x: number; y: number }, keepRatio: boolean) {
+  let left = start.x;
+  let right = start.x + start.w;
+  let top = start.y;
+  let bottom = start.y + start.h;
+  if (handle.includes("w")) left = pointer.x;
+  if (handle.includes("e")) right = pointer.x;
+  if (handle.includes("n")) top = pointer.y;
+  if (handle.includes("s")) bottom = pointer.y;
+  if (keepRatio && start.w > 0 && start.h > 0) {
+    const ratio = start.w / start.h;
+    const width = Math.max(2, Math.abs(right - left));
+    const height = width / ratio;
+    if (handle.includes("n")) top = bottom - height;
+    else bottom = top + height;
+  }
+  return { x: Math.min(left, right), y: Math.min(top, bottom), w: Math.max(2, Math.abs(right - left)), h: Math.max(2, Math.abs(bottom - top)) };
+}
+
+function resizeHandleAt(point: { x: number; y: number }, bounds: { x: number; y: number; w: number; h: number }, tolerance: number): ResizeHandle | null {
+  const handles: [ResizeHandle, number, number][] = [
+    ["nw", bounds.x, bounds.y], ["ne", bounds.x + bounds.w, bounds.y],
+    ["sw", bounds.x, bounds.y + bounds.h], ["se", bounds.x + bounds.w, bounds.y + bounds.h],
+  ];
+  return handles.find(([, x, y]) => Math.abs(point.x - x) <= tolerance && Math.abs(point.y - y) <= tolerance)?.[0] ?? null;
+}
+
 function cloneElements(els: CanvasElement[]): CanvasElement[] {
   return els.map((el) => {
     const copy = { ...el, style: { ...el.style } };
@@ -90,7 +137,9 @@ type Action =
   | { type: "none" }
   | { type: "drawing" }
   | { type: "panning"; startCam: { x: number; y: number }; startPtr: { x: number; y: number } }
-  | { type: "moving"; elementId: string; offset: { x: number; y: number } }
+  | { type: "moving"; elementIds: string[]; offsets: Record<string, { x: number; y: number }>; startPointer: { x: number; y: number }; screenshotOffset: { x: number; y: number } | null; overlayBounds: Record<string, { x: number; y: number; w: number; h: number }> }
+  | { type: "resizing"; target: string; handle: ResizeHandle; startBounds: { x: number; y: number; w: number; h: number }; startElement: CanvasElement | null }
+  | { type: "marquee"; start: { x: number; y: number }; additive: boolean; initialIds: string[]; initialScreenshot: boolean }
   | { type: "erasing" };
 
 interface LatexOverlay {
@@ -166,6 +215,8 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
   const screenshotRef = useRef<CanvasScreenshot | null>(null);
   const cameraRef = useRef<Camera>({ x: 0, y: 0, zoom: 1 });
   const selectedRef = useRef<Set<string>>(new Set());
+  const selectedScreenshotRef = useRef(false);
+  const marqueeRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const toolRef = useRef<Tool>("freedraw");
   const styleRef = useRef<ElementStyle>({ ...DEFAULT_STYLE, strokeColor: dark ? "#ffffff" : DEFAULT_STYLE.strokeColor });
   const darkRef = useRef(dark);
@@ -194,6 +245,7 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
   const [recognitionError, setRecognitionError] = useState(false);
   const [latexEnabled, setLatexEnabled] = useState(false);
   const [latexOverlays, setLatexOverlays] = useState<Record<string, LatexOverlay>>({});
+  const latexOverlaysRef = useRef<Record<string, LatexOverlay>>({});
   const [recognizing, setRecognizing] = useState(false);
   const [overlayVersion, setOverlayVersion] = useState(0);
   const [overlayCamera, setOverlayCamera] = useState<Camera>({ x: 0, y: 0, zoom: 1 });
@@ -210,7 +262,10 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
     const dpr = window.devicePixelRatio || 1;
     const hiddenIds = new Set(hiddenMathIdsRef.current);
     if (textDraftRef.current?.elementId) hiddenIds.add(textDraftRef.current.elementId);
-    renderScene(ctx, cvs.width / dpr, cvs.height / dpr, elementsRef.current, selectedRef.current, cameraRef.current, darkRef.current, hiddenIds, screenshotRef.current);
+    const selectedLatexBounds = Object.values(latexOverlaysRef.current)
+      .filter((overlay) => overlay.strokeIds.some((id) => selectedRef.current.has(id)))
+      .map((overlay) => overlay.bounds);
+    renderScene(ctx, cvs.width / dpr, cvs.height / dpr, elementsRef.current, selectedRef.current, cameraRef.current, darkRef.current, hiddenIds, screenshotRef.current, selectedScreenshotRef.current, marqueeRef.current, selectedLatexBounds);
   }, []);
 
   const updateStyle = useCallback((u: Partial<ElementStyle>) => {
@@ -230,12 +285,21 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
     pendingRecognitionStrokesRef.current.clear();
     recognitionRequestStrokesRef.current = {};
     hiddenMathIdsRef.current.clear();
+    latexOverlaysRef.current = {};
     setLatexOverlays({});
     setRecognizing(false);
     setRecognitionError(false);
     clearRecognizedEquations();
     render();
   }, [render]);
+
+  const removeLatexOverlays = useCallback((strokeIds: string[]) => {
+    const removed = new Set(strokeIds);
+    const next = Object.fromEntries(Object.entries(latexOverlaysRef.current).filter(([, overlay]) => !overlay.strokeIds.some((strokeId) => removed.has(strokeId))));
+    if (Object.keys(next).length === Object.keys(latexOverlaysRef.current).length) return;
+    latexOverlaysRef.current = next;
+    setLatexOverlays(next);
+  }, []);
 
   const receiveRecognition = useCallback((event: MessageEvent<string>) => {
     let message: { type?: string; requestId?: string; strokeId?: string; strokeIds?: string[]; latex?: string; error?: string };
@@ -274,16 +338,18 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
     const latex = normalizeLatex(message.latex);
     if (!latex) return;
     for (const strokeId of strokeIds) hiddenMathIdsRef.current.add(strokeId);
+    const overlay: LatexOverlay = {
+      id: requestId,
+      strokeIds,
+      latex,
+      bounds,
+      strokeWidth: Math.max(...elements.map((element) => element.style.strokeWidth)),
+      color: elements[0].style.strokeColor,
+    };
+    latexOverlaysRef.current = { ...latexOverlaysRef.current, [requestId]: overlay };
     setLatexOverlays((previous) => ({
       ...previous,
-      [requestId]: {
-        id: requestId,
-        strokeIds,
-        latex,
-        bounds,
-        strokeWidth: Math.max(...elements.map((element) => element.style.strokeWidth)),
-        color: elements[0].style.strokeColor,
-      },
+      [requestId]: overlay,
     }));
     setRecognitionError(false);
     const equation = {
@@ -423,6 +489,7 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
     selectedRef.current.clear();
     recognitionRequestRef.current += 1;
     hiddenMathIdsRef.current.clear();
+    latexOverlaysRef.current = {};
     setLatexOverlays({});
     clearRecognizedEquations();
     syncScene();
@@ -437,6 +504,7 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
     selectedRef.current.clear();
     recognitionRequestRef.current += 1;
     hiddenMathIdsRef.current.clear();
+    latexOverlaysRef.current = {};
     setLatexOverlays({});
     clearRecognizedEquations();
     syncScene();
@@ -455,11 +523,81 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
     if (activePointerRef.current !== null || (e.button !== 0 && e.button !== 1)) return;
     activePointerRef.current = e.pointerId;
     canvasRef.current?.setPointerCapture(e.pointerId);
-    selectedRef.current.clear();
     const sp = screenPos(e);
     const cam = cameraRef.current;
     const wp = screenToWorld(sp.x, sp.y, cam);
     const activeTool: Tool = spaceRef.current ? "hand" : toolRef.current;
+
+    if (activeTool === "select" && e.button === 0) {
+      const tolerance = 10 / cam.zoom;
+      const selectedElement = elementsRef.current.find((el) => selectedRef.current.has(el.id) && !el.isDeleted && resizeHandleAt(wp, elementBounds(el), tolerance));
+      const selectedScreenshot = screenshotRef.current && selectedScreenshotRef.current ? resizeHandleAt(wp, screenshotBounds(screenshotRef.current), tolerance) : null;
+      const resizeTarget = selectedScreenshot ? SCREENSHOT_ID : selectedElement?.id;
+      const resizeHandle = selectedScreenshot ?? (selectedElement ? resizeHandleAt(wp, elementBounds(selectedElement), tolerance) : null);
+      if (resizeTarget && resizeHandle) {
+        const bounds = resizeTarget === SCREENSHOT_ID ? screenshotBounds(screenshotRef.current!) : elementBounds(selectedElement!);
+        actionRef.current = { type: "resizing", target: resizeTarget, handle: resizeHandle, startBounds: bounds, startElement: selectedElement ? cloneElements([selectedElement])[0] : null };
+        return;
+      }
+
+      const latexHit = Object.values(latexOverlaysRef.current).reverse().find((overlay) => pointInBounds(wp, overlay.bounds, tolerance));
+      const hit = latexHit ? null : hitTest(elementsRef.current, wp.x, wp.y);
+      const screenshotHit = !hit && !latexHit && screenshotRef.current && pointInBounds(wp, screenshotBounds(screenshotRef.current), tolerance);
+      if (hit || latexHit || screenshotHit) {
+        const hitIds = latexHit?.strokeIds ?? (hit ? [hit.id] : []);
+        const id = hitIds[0] ?? SCREENSHOT_ID;
+        const alreadySelected = id === SCREENSHOT_ID
+          ? selectedScreenshotRef.current
+          : hitIds.every((hitId) => selectedRef.current.has(hitId));
+        if (e.shiftKey) {
+          if (id === SCREENSHOT_ID) selectedScreenshotRef.current = !alreadySelected;
+          else if (alreadySelected) hitIds.forEach((hitId) => selectedRef.current.delete(hitId));
+          else hitIds.forEach((hitId) => selectedRef.current.add(hitId));
+        } else if (!alreadySelected) {
+          selectedRef.current.clear();
+          selectedScreenshotRef.current = false;
+          if (id === SCREENSHOT_ID) selectedScreenshotRef.current = true;
+          else hitIds.forEach((hitId) => selectedRef.current.add(hitId));
+        }
+
+        if ((id === SCREENSHOT_ID && selectedScreenshotRef.current) || (id !== SCREENSHOT_ID && hitIds.some((hitId) => selectedRef.current.has(hitId)))) {
+          const offsets: Record<string, { x: number; y: number }> = {};
+          for (const element of elementsRef.current) {
+            if (selectedRef.current.has(element.id)) offsets[element.id] = { x: element.x - wp.x, y: element.y - wp.y };
+          }
+          const overlayBounds: Record<string, { x: number; y: number; w: number; h: number }> = {};
+          for (const overlay of Object.values(latexOverlaysRef.current)) {
+            if (overlay.strokeIds.some((strokeId) => selectedRef.current.has(strokeId))) overlayBounds[overlay.id] = { ...overlay.bounds };
+          }
+          actionRef.current = {
+            type: "moving",
+            elementIds: [...selectedRef.current],
+            offsets,
+            startPointer: { ...wp },
+            screenshotOffset: selectedScreenshotRef.current && screenshotRef.current ? { x: screenshotRef.current.x - wp.x, y: screenshotRef.current.y - wp.y } : null,
+            overlayBounds,
+          };
+        } else {
+          actionRef.current = { type: "none" };
+        }
+        render();
+        return;
+      }
+
+      if (!e.shiftKey) {
+        selectedRef.current.clear();
+        selectedScreenshotRef.current = false;
+      }
+      marqueeRef.current = { x: sp.x, y: sp.y, w: 0, h: 0 };
+      actionRef.current = { type: "marquee", start: wp, additive: e.shiftKey, initialIds: [...selectedRef.current], initialScreenshot: selectedScreenshotRef.current };
+      render();
+      return;
+    }
+
+    if (activeTool !== "select") {
+      selectedRef.current.clear();
+      selectedScreenshotRef.current = false;
+    }
 
     if (e.button === 1 || activeTool === "hand" || (e.pointerType === "touch" && activeTool !== "text")) {
       actionRef.current = { type: "panning", startCam: { x: cam.x, y: cam.y }, startPtr: sp };
@@ -468,15 +606,6 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
 
     switch (activeTool) {
       case "select": {
-        const hit = hitTest(elementsRef.current, wp.x, wp.y);
-        if (hit) {
-          selectedRef.current = new Set([hit.id]);
-          actionRef.current = { type: "moving", elementId: hit.id, offset: { x: hit.x - wp.x, y: hit.y - wp.y } };
-        } else {
-          selectedRef.current.clear();
-          actionRef.current = { type: "none" };
-        }
-        render();
         break;
       }
       case "rectangle":
@@ -530,7 +659,7 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
         clearRecognition();
         actionRef.current = { type: "erasing" };
         const hit = hitTest(elementsRef.current, wp.x, wp.y);
-        if (hit) { hit.isDeleted = true; render(); }
+        if (hit) { hit.isDeleted = true; removeLatexOverlays([hit.id]); render(); }
         break;
       }
     }
@@ -579,11 +708,96 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
       }
       render();
     } else if (act.type === "moving") {
-      const el = elementsRef.current.find((e) => e.id === act.elementId);
-      if (el) { el.x = wp.x + act.offset.x; el.y = wp.y + act.offset.y; setOverlayVersion((version) => version + 1); render(); }
+      elementsRef.current = elementsRef.current.map((element) => {
+        const offset = act.offsets[element.id];
+        return offset ? { ...element, x: wp.x + offset.x, y: wp.y + offset.y } : element;
+      });
+      if (act.screenshotOffset && screenshotRef.current) {
+        screenshotRef.current.x = wp.x + act.screenshotOffset.x;
+        screenshotRef.current.y = wp.y + act.screenshotOffset.y;
+      }
+      const deltaX = wp.x - act.startPointer.x;
+      const deltaY = wp.y - act.startPointer.y;
+      if (Object.keys(act.overlayBounds).length) {
+        const nextOverlays = { ...latexOverlaysRef.current };
+        for (const [overlayId, bounds] of Object.entries(act.overlayBounds)) {
+          const overlay = nextOverlays[overlayId];
+          if (overlay) overlay.bounds = { ...bounds, x: bounds.x + deltaX, y: bounds.y + deltaY };
+        }
+        latexOverlaysRef.current = nextOverlays;
+        setLatexOverlays(nextOverlays);
+      }
+      setOverlayVersion((version) => version + 1);
+      render();
+    } else if (act.type === "resizing") {
+      const next = resizeBounds(act.startBounds, act.handle, wp, e.shiftKey);
+      if (act.target === SCREENSHOT_ID && screenshotRef.current) {
+        Object.assign(screenshotRef.current, next);
+      } else {
+        const element = elementsRef.current.find((item) => item.id === act.target);
+        const original = act.startElement;
+        if (element && original) {
+          let replacement: CanvasElement;
+          if (original.type === "freedraw" || original.type === "line" || original.type === "arrow") {
+            const originalBounds = elementBounds(original);
+            const sx = originalBounds.w ? next.w / originalBounds.w : 1;
+            const sy = originalBounds.h ? next.h / originalBounds.h : 1;
+            const points = original.points.map((point) => {
+              const [px, py] = pointXY(point);
+              const worldX = original.x + px;
+              const worldY = original.y + py;
+              const nextPoint = [
+                (worldX - originalBounds.x) * sx,
+                (worldY - originalBounds.y) * sy,
+              ] as [number, number];
+              return Array.isArray(point) ? nextPoint : { x: nextPoint[0], y: nextPoint[1], t: point.t };
+            }) as typeof original.points;
+            replacement = { ...element, x: next.x, y: next.y, width: next.w, height: next.h, points } as CanvasElement;
+          } else {
+            replacement = { ...element, ...next } as CanvasElement;
+          }
+          elementsRef.current = elementsRef.current.map((item) => item.id === element.id ? replacement : item);
+          const nextOverlays = { ...latexOverlaysRef.current };
+          for (const overlay of Object.values(nextOverlays)) {
+            if (!overlay.strokeIds.includes(element.id)) continue;
+            const sourceElements = elementsRef.current.filter((item): item is FreedrawElement => overlay.strokeIds.includes(item.id) && item.type === "freedraw" && !item.isDeleted);
+            if (!sourceElements.length) continue;
+            const nextBounds = sourceElements.reduce((combined, source) => {
+              const current = elementBounds(source);
+              const x = Math.min(combined.x, current.x);
+              const y = Math.min(combined.y, current.y);
+              const x1 = Math.max(combined.x + combined.w, current.x + current.w);
+              const y1 = Math.max(combined.y + combined.h, current.y + current.h);
+              return { x, y, w: x1 - x, h: y1 - y };
+            }, elementBounds(sourceElements[0]));
+            nextOverlays[overlay.id] = { ...overlay, bounds: nextBounds };
+          }
+          latexOverlaysRef.current = nextOverlays;
+          setLatexOverlays(nextOverlays);
+        }
+      }
+      render();
+    } else if (act.type === "marquee") {
+      const rect = normalizedRect(act.start, wp);
+      marqueeRef.current = {
+        x: (rect.x - cam.x) * cam.zoom,
+        y: (rect.y - cam.y) * cam.zoom,
+        w: rect.w * cam.zoom,
+        h: rect.h * cam.zoom,
+      };
+      selectedRef.current = new Set(act.initialIds);
+      selectedScreenshotRef.current = act.initialScreenshot;
+      for (const element of elementsRef.current) {
+        if (!element.isDeleted && overlaps(elementBounds(element), rect)) selectedRef.current.add(element.id);
+      }
+      for (const overlay of Object.values(latexOverlaysRef.current)) {
+        if (overlaps(overlay.bounds, rect)) overlay.strokeIds.forEach((strokeId) => selectedRef.current.add(strokeId));
+      }
+      if (screenshotRef.current && overlaps(screenshotBounds(screenshotRef.current), rect)) selectedScreenshotRef.current = true;
+      render();
     } else if (act.type === "erasing") {
       const hit = hitTest(elementsRef.current, wp.x, wp.y);
-      if (hit && !hit.isDeleted) { hit.isDeleted = true; render(); }
+      if (hit && !hit.isDeleted) { hit.isDeleted = true; removeLatexOverlays([hit.id]); render(); }
     }
   };
 
@@ -620,7 +834,8 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
       if (el?.type === "freedraw" && !el.isDeleted) scheduleRecognition(el.id);
     }
 
-    if (act.type === "moving" || act.type === "erasing") pushHistory();
+    if (act.type === "moving" || act.type === "erasing" || (act.type === "resizing" && act.target !== SCREENSHOT_ID)) pushHistory();
+    if (act.type === "marquee") marqueeRef.current = null;
     actionRef.current = { type: "none" };
     setOverlayVersion((version) => version + 1);
     render();
@@ -673,7 +888,13 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!screenshot || !canvas) return;
+    if (!canvas) return;
+    if (!screenshot) {
+      screenshotRef.current = null;
+      selectedScreenshotRef.current = false;
+      render();
+      return;
+    }
     const bounds = canvas.getBoundingClientRect();
     const camera = cameraRef.current;
     const image = screenshot.image;
@@ -683,8 +904,11 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
       width: image.naturalWidth * scale / camera.zoom,
       height: image.naturalHeight * scale / camera.zoom,
     };
-    clearRecognition();
+    selectedScreenshotRef.current = false;
+    marqueeRef.current = null;
+    const recognitionReset = window.setTimeout(clearRecognition, 0);
     render();
+    return () => window.clearTimeout(recognitionReset);
   }, [screenshot, clearRecognition, render]);
 
   // resize & DPR
@@ -744,12 +968,14 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
       if (k === " ") { spaceRef.current = true; e.preventDefault(); return; }
 
       if (!e.ctrlKey && !e.metaKey) {
-        const map: Record<string, Tool> = { p: "freedraw", "1": "freedraw", e: "eraser", "2": "eraser", t: "text", "3": "text" };
+        const map: Record<string, Tool> = { v: "select", "1": "select", p: "freedraw", e: "eraser", "2": "eraser", t: "text", "3": "text" };
         if (map[k]) { setTool(map[k]); return; }
       }
 
       if ((k === "delete" || k === "backspace") && selectedRef.current.size) {
+        const deletedIds = [...selectedRef.current];
         for (const el of elementsRef.current) if (selectedRef.current.has(el.id)) el.isDeleted = true;
+        removeLatexOverlays(deletedIds);
         selectedRef.current.clear();
         pushHistory();
         render();
@@ -764,7 +990,7 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
-  }, [editingText, setTool, pushHistory, render, undo, redo]);
+  }, [editingText, setTool, pushHistory, render, undo, redo, removeLatexOverlays]);
 
   // Theme changes update the next neutral pen color, never stored ink.
   useEffect(() => {
