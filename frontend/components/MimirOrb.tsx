@@ -1,37 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import {
-  ConnectionState,
-  ParticipantEvent,
-  Room,
-  RoomEvent,
-  Track,
-} from "livekit-client";
-import type { RemoteParticipant } from "livekit-client";
-import { registerCanvasRpcs } from "@/lib/livekit/rpc";
-import { tutorCanvas } from "@/lib/tutor/tutorCanvas";
-
-type VoiceStatus =
-  | "disconnected"
-  | "connecting"
-  | "listening"
-  | "thinking"
-  | "speaking"
-  | "error";
+import { useTutorSession, type VoiceStatus } from "@/lib/livekit/useTutorSession";
+import { useLearningPreferences } from "@/lib/tutor/support";
+import VoiceFeed from "./VoiceFeed";
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
-  disconnected: "",
-  connecting: "Connecting…",
-  listening: "Listening",
-  thinking: "Thinking…",
-  speaking: "Speaking",
-  error: "Connection failed",
+  disconnected: "", connecting: "Connecting…", listening: "Listening",
+  thinking: "Looking at your work…", speaking: "Speaking", error: "Connection failed",
 };
-
-// verbose diagnostics while the voice slice stabilises — open devtools
-const log = (...args: unknown[]) => console.debug("[MimirOrb]", ...args);
 
 const AURA_OPACITY: Partial<Record<VoiceStatus, number[]>> = {
   connecting: [0.35, 0.6, 0.35],
@@ -50,113 +27,12 @@ const AURA_PERIOD: Partial<Record<VoiceStatus, number>> = {
 /** Mimir orb: press to talk, press again to end. The orb's motion and a
  * screen-edge aura encode the session state instead of opening a panel. */
 export default function MimirOrb() {
-  const roomRef = useRef<Room | null>(null);
-  const connectAttemptRef = useRef(0);
-  const audioElsRef = useRef<HTMLMediaElement[]>([]);
-  const [status, setStatus] = useState<VoiceStatus>("disconnected");
-  const [error, setError] = useState<string | null>(null);
-  const [everConnected, setEverConnected] = useState(false);
-  const reduced = useReducedMotion();
-
-  const connected =
-    status !== "disconnected" && status !== "error";
-  const auraActive =
-    status === "connecting" || status === "listening" ||
-    status === "thinking" || status === "speaking";
-
-  const disconnect = useCallback(async () => {
-    connectAttemptRef.current += 1;
-    for (const el of audioElsRef.current) el.remove();
-    audioElsRef.current = [];
-    const room = roomRef.current;
-    roomRef.current = null;
-    if (room) await room.disconnect();
-    setStatus("disconnected");
-  }, []);
-
-  // tear down the room when the component unmounts
-  useEffect(() => {
-    return () => {
-      void disconnect();
-    };
-  }, [disconnect]);
-
-  function watchAgent(p: RemoteParticipant) {
-    if (!p.isAgent) return;
-    log("agent participant found:", p.identity, "state:", p.attributes["lk.agent.state"]);
-    const apply = () => {
-      const s = p.attributes["lk.agent.state"];
-      log("agent state ->", s);
-      if (s === "listening" || s === "thinking" || s === "speaking") setStatus(s);
-    };
-    apply();
-    p.on(ParticipantEvent.AttributesChanged, apply);
-  }
-
-  async function connect() {
-    const attempt = ++connectAttemptRef.current;
-    setStatus("connecting");
-    setError(null);
-    try {
-      const tokenUrl = process.env.NEXT_PUBLIC_TOKEN_URL ?? `${window.location.protocol}//${window.location.hostname}:8000`;
-      log("fetching token from", tokenUrl);
-      const res = await fetch(`${tokenUrl}/token`);
-      if (!res.ok) throw new Error("Voice is unavailable right now. Please try again.");
-      const { token, url } = (await res.json()) as { token: string; url: string };
-
-      if (attempt !== connectAttemptRef.current) return;
-      const room = new Room();
-      roomRef.current = room;
-
-      // play the tutor's audio
-      room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
-        log("track subscribed:", track.kind, "from", participant.identity);
-        if (track.kind !== Track.Kind.Audio) return;
-        const el = track.attach();
-        audioElsRef.current.push(el);
-        document.body.appendChild(el);
-      });
-      room.on(RoomEvent.TrackUnsubscribed, (track) => {
-        for (const el of track.detach()) {
-          audioElsRef.current = audioElsRef.current.filter((e) => e !== el);
-          el.remove();
-        }
-      });
-      room.on(RoomEvent.ConnectionStateChanged, (state) => {
-        log("connection state ->", state);
-        if (state === ConnectionState.Connected) {
-          setStatus("listening");
-          setEverConnected(true);
-        }
-        if (state === ConnectionState.Disconnected) setStatus("disconnected");
-      });
-
-      await room.connect(url, token);
-      if (attempt !== connectAttemptRef.current) { await room.disconnect(); return; }
-      log("room connected as", room.localParticipant.identity);
-
-      // the tutor draws via these RPC methods — register before it can call
-      registerCanvasRpcs(room.localParticipant, tutorCanvas);
-
-      // mirror the agent's published state (listening / thinking / speaking)
-      for (const p of room.remoteParticipants.values()) watchAgent(p);
-      room.on(RoomEvent.ParticipantConnected, watchAgent);
-
-      await room.localParticipant.setMicrophoneEnabled(true);
-      log("microphone enabled");
-    } catch (e) {
-      if (attempt !== connectAttemptRef.current) return;
-      const msg = e instanceof Error ? e.message : String(e);
-      log("connect failed:", msg);
-      await disconnect();
-      setError(
-        msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("notallowed")
-          ? "Microphone access denied"
-          : "Voice is unavailable right now. Please try again.",
-      );
-      setStatus("error");
-    }
-  }
+  const session = useTutorSession();
+  const { status, error, everConnected, connected, connect, disconnect } = session;
+  const preferences = useLearningPreferences();
+  const systemReduced = useReducedMotion();
+  const reduced = systemReduced || preferences.calm || session.paused;
+  const auraActive = connected && !session.paused && !preferences.calm;
 
   const orbAnimate = reduced ? {} : (
     status === "listening" ? { scale: [1, 1.05, 1] }
@@ -187,7 +63,8 @@ export default function MimirOrb() {
         }
         aria-hidden="true"
       />
-      <div className={`mimir-orb-zone orb-${status}`}>
+      <VoiceFeed session={session} />
+      <div className={`mimir-orb-zone orb-${status}`} data-paused={session.paused}>
         <motion.button
           type="button"
           className="mimir-orb"
@@ -238,9 +115,10 @@ export default function MimirOrb() {
             </motion.span>
           )}
         </AnimatePresence>
+        {!connected && <button className="orb-type-entry" onClick={() => void connect(false)}>Use keyboard</button>}
         <div className="orb-readout" role="status" aria-live="polite">
-          {STATUS_LABEL[status] && <span className="orb-status">{STATUS_LABEL[status]}</span>}
-          {status === "error" && error && <span className="orb-error" role="alert">{error}</span>}
+          {STATUS_LABEL[status] && <span className="orb-status">{session.paused ? "Paused" : STATUS_LABEL[status]}</span>}
+          {!connected && error && <span className="orb-error" role="alert">{error}</span>}
         </div>
       </div>
     </>

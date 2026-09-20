@@ -71,7 +71,7 @@ These are product constraints from the conversation, not a newly imposed aesthet
 
 Confirmed interaction needs are handwriting with an Apple Pencil, spoken help, and a visible indication of the expression being discussed. Preserve readable ink and controls in both currently supported system themes.
 
-No formal accessibility standard or additional individual accommodation was specified. Visible transcripts, non-color annotation cues, accessible control names, comfortable touch targets, and reduced-motion alternatives are recommended future requirements, not verified features. Do not claim the current interface meets an accessibility conformance level.
+The workspace now includes a Learning tools popover with live captions, one-step guidance, short replies, slower speech, larger text, wider text spacing, calm motion and temporary expression color emphasis. A compact caption dock supports typed messages, reading the question aloud, another explanation, microphone control and pause/resume. These are student-selected preferences, not diagnosis-specific modes or claims of clinical benefit. No formal accessibility conformance level or physical iPad verification is claimed.
 
 ## Decisions Still Open
 
@@ -81,3 +81,5 @@ No formal accessibility standard or additional individual accommodation was spec
 - Durable persistence, full voice/recognition validation on iPad, and general visual explanations. Screenshot OCR currently targets printed English questions and basic algebra; complex mathematical layout may need correction.
 
 Implementation facts and a suggested build order live in [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md). Visual values extracted from the current app live in [DESIGN.md](DESIGN.md).
+
+Reliability and latency refinement (2026-09-20): math teaching uses versioned visual evidence and a checked plan. During an active session the tutor silently prepares a hint after handwriting settles, reusing it only while the board remains unchanged. Hints and eligible numeric answers can respond without another model call; specific or ambiguous requests still require fresh planning. Checked words are delivered directly through speech synthesis, with prepared audio cached in memory. Multiple problems can be isolated with a drag-to-focus area. Correct answers can advance to a single equivalent equation with a handwriting blank; incorrect or ambiguous work stays at the current step. Basic arithmetic/algebra checks are deterministic, while visual interpretation and teaching judgments remain model-dependent. Speech-start detection stops audio and cancels a pending turn; brief blips are ignored. No continuous proactive error correction or device-level noise guarantee is claimed.

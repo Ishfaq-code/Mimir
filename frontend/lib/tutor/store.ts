@@ -1,3 +1,4 @@
+import { clearHighlight } from "./boardView";
 import type { CanvasState, RecognizedEquation, TutorAnnotation } from "./types";
 
 // The workspace supplies a confirmed screenshot question. No synthetic
@@ -75,6 +76,7 @@ export function clearTutorAnnotations(): void {
 
 /** Draft OCR is never tutor context. Only the student's confirmed text is used. */
 export function setConfirmedQuestion(text: string | null): void {
+  clearHighlight();
   question = text ? { text, source: "screenshot", confirmed: true } : null;
   equations = [];
   tutorAnnotations = [];
@@ -96,6 +98,12 @@ export function setPracticeProblem(latex: string): void {
 export function setRecognizedWork(equation: RecognizedEquation | null): void {
   equations = equations.filter(item => item.id !== "student-work");
   if (equation) equations = [...equations, equation];
+  revision += 1;
+  emit();
+}
+
+export function removeTutorAnnotation(id: string): void {
+  tutorAnnotations = tutorAnnotations.filter(item => item.id !== id);
   revision += 1;
   emit();
 }

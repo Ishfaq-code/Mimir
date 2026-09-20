@@ -168,3 +168,14 @@ Controls have names and visible keyboard focus. Ink/width selections use pressed
 - Don't prioritize **Teacher dashboards before the core tutor works.**
 - Don't add decorative gradients outside the orb, glass panels, repeated card grids, or filler copy.
 - Don't claim a provider or hardware test passed from frontend-only checks.
+
+
+## Inline learning support (2026-09-20)
+
+Learning tools lives in a header popover with native checkboxes and keyboard dismissal. The canvas keeps its full width. During a conversation, a compact caption dock sits above the drawing toolbar; full history and a text composer expand on request. It shows the latest Mimir turn by default. Quick-action transcripts use the visible action name, not internal prompting text. The question chip moves to the upper right while this dock is open.
+
+Tutor emphasis temporarily paints the selected ink/text/screenshot symbols purple, with a quiet underline as a second cue. It has a dismiss control and expires after nine seconds. Original ink styles and image pixels remain unchanged; the tint is only a rendering layer. Pan and zoom move this layer with the board; edits invalidate stale targets. The model sees numbered stroke/symbol regions only inside its private snapshot, not on the student's working surface.
+
+Larger reading text is 20 px; extra spacing uses 1.9 line height and small letter/word spacing. Calm motion disables decorative motion and the aura. System reduced-motion remains honored. No special font or diagnosis label is imposed.
+
+A small **Focus a problem** control below the top line lets students drag a working area. A quiet dashed outline marks that area; the tutor sees its crop. **Checking your work…** appears in the existing caption dock while vision/reasoning runs. Next-step notation uses one empty handwriting space and a remove button, on the existing canvas without a sidebar.

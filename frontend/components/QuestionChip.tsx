@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import Icon from "./Icon";
+import { useLearningPreferences } from "@/lib/tutor/support";
 import type { QuestionStatus } from "@/lib/useScreenshotQuestion";
 
 interface QuestionChipProps {
@@ -21,7 +22,9 @@ interface QuestionChipProps {
 export default function QuestionChip({ status, text, error, progress, onSetText, onRetry, onDismiss }: QuestionChipProps) {
   const [editing, setEditing] = useState(false);
   const editorRef = useRef<HTMLTextAreaElement>(null);
-  const reduced = useReducedMotion();
+  const preferences = useLearningPreferences();
+  const systemReduced = useReducedMotion();
+  const reduced = systemReduced || preferences.calm;
 
   useEffect(() => {
     if (editing) {

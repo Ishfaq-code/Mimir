@@ -25,6 +25,9 @@ export interface TutorLatexAnnotation {
   type: "latex";
   createdAt: number;
   latex: string;
+  template?: string;
+  width?: number;
+  height?: number;
   x: number;
   y: number;
 }
@@ -50,6 +53,9 @@ export interface CanvasResult {
 
 export interface WriteLatexArgs {
   latex: string;
+  template?: string;
+  width?: number;
+  height?: number;
   x: number;
   y: number;
 }

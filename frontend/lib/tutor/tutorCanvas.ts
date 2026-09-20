@@ -1,3 +1,4 @@
+import { getPaused } from "./support";
 import * as store from "./store";
 import type { CanvasResult, CanvasState, WriteLatexArgs } from "./types";
 
@@ -17,6 +18,7 @@ class OverlayTutorCanvas implements TutorCanvas {
   }
 
   async writeLatex({ latex, x, y }: WriteLatexArgs): Promise<CanvasResult> {
+    if (getPaused()) return { success: false, error: "conversation_paused" };
     if (!latex?.trim() || !Number.isFinite(x) || !Number.isFinite(y)) {
       return { success: false, error: "invalid_args" };
     }

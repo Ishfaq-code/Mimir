@@ -17,6 +17,10 @@ import type {
 } from "@/lib/canvas/types";
 import { DEFAULT_STYLE, pointXY } from "@/lib/canvas/types";
 import { renderScene, type CanvasScreenshot } from "@/lib/canvas/renderer";
+import { captureScene, snapToInk } from "@/lib/canvas/capture";
+import { registerBoardSource, clearHighlight, getHighlight, subscribeHighlight, getFocus } from "@/lib/tutor/boardView";
+import { getPreferences, subscribeSupport } from "@/lib/tutor/support";
+import { getCanvasState } from "@/lib/tutor/store";
 import type { Screenshot } from "@/lib/screenshot";
 import {
   clearRecognizedEquations,
@@ -26,6 +30,7 @@ import {
 } from "@/lib/tutor/store";
 import IslandToolbar from "./IslandToolbar";
 import Icon from "./Icon";
+import ProblemFocus from "./ProblemFocus";
 import TutorOverlay from "./TutorOverlay";
 import CanvasTextEditor, { type TextDraft } from "./CanvasTextEditor";
 
@@ -210,6 +215,7 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
   // ── refs ────────────────────────────────────────────────────────
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const renderFrameRef = useRef<number | null>(null);
 
   const elementsRef = useRef<CanvasElement[]>([]);
   const screenshotRef = useRef<CanvasScreenshot | null>(null);
@@ -255,7 +261,7 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
   const setTool = useCallback((t: Tool) => { toolRef.current = t; _setTool(t); }, []);
 
   // ── render ──────────────────────────────────────────────────────
-  const render = useCallback(() => {
+  const paint = useCallback(() => {
     const ctx = ctxRef.current;
     const cvs = canvasRef.current;
     if (!ctx || !cvs) return;
@@ -265,8 +271,45 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
     const selectedLatexBounds = Object.values(latexOverlaysRef.current)
       .filter((overlay) => overlay.strokeIds.some((id) => selectedRef.current.has(id)))
       .map((overlay) => overlay.bounds);
-    renderScene(ctx, cvs.width / dpr, cvs.height / dpr, elementsRef.current, selectedRef.current, cameraRef.current, darkRef.current, hiddenIds, screenshotRef.current, selectedScreenshotRef.current, marqueeRef.current, selectedLatexBounds);
+    renderScene(ctx, cvs.width / dpr, cvs.height / dpr, elementsRef.current, selectedRef.current, cameraRef.current, darkRef.current, hiddenIds, screenshotRef.current, selectedScreenshotRef.current, marqueeRef.current, selectedLatexBounds, getPreferences().highlights ? getHighlight() : null);
   }, []);
+
+  // Pencil events can arrive faster than the display refreshes. Keep every ink
+  // sample, but paint the board only once per frame.
+  const render = useCallback(() => {
+    if (renderFrameRef.current !== null) return;
+    renderFrameRef.current = requestAnimationFrame(() => {
+      renderFrameRef.current = null;
+      paint();
+    });
+  }, [paint]);
+  useEffect(() => () => {
+    if (renderFrameRef.current !== null) cancelAnimationFrame(renderFrameRef.current);
+    renderFrameRef.current = null;
+  }, []);
+
+  useEffect(() => subscribeHighlight(render), [render]);
+  useEffect(() => subscribeSupport(render), [render]);
+
+  function sceneRevision() {
+    const shot = screenshotRef.current;
+    const value = JSON.stringify([elementsRef.current, shot && [shot.image.src, shot.x, shot.y, shot.width, shot.height], getCanvasState().question, getCanvasState().tutorAnnotations, getFocus(), cameraRef.current, canvasRef.current?.clientWidth, canvasRef.current?.clientHeight]);
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619);
+    return (hash >>> 0).toString(36);
+  }
+
+  useEffect(() => registerBoardSource({
+    revision: sceneRevision,
+    isBusy: () => actionRef.current.type !== "none" || !!textDraftRef.current,
+    hasContent: () => !!screenshotRef.current || elementsRef.current.some(el=>!el.isDeleted),
+    capture: () => {
+      if (actionRef.current.type !== "none" || textDraftRef.current) return Promise.reject(new Error("Student is writing; try again after they finish"));
+      const rect = canvasRef.current!.getBoundingClientRect();
+      return captureScene(elementsRef.current, screenshotRef.current, { ...cameraRef.current }, rect.width, rect.height, darkRef.current, sceneRevision());
+    },
+    snap: bounds => snapToInk(bounds, elementsRef.current),
+  }), []);
 
   const updateStyle = useCallback((u: Partial<ElementStyle>) => {
     const next = { ...styleRef.current, ...u };
@@ -475,6 +518,7 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
 
   // ── history ─────────────────────────────────────────────────────
   const pushHistory = useCallback(() => {
+    clearHighlight();
     const h = historyRef.current;
     h.length = histIdxRef.current + 1;
     h.push(cloneElements(elementsRef.current));
@@ -484,6 +528,7 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
 
   const undo = useCallback(() => {
     if (histIdxRef.current <= 0) return;
+    clearHighlight();
     histIdxRef.current--;
     elementsRef.current = cloneElements(historyRef.current[histIdxRef.current]);
     selectedRef.current.clear();
@@ -499,6 +544,7 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
   const redo = useCallback(() => {
     const h = historyRef.current;
     if (histIdxRef.current >= h.length - 1) return;
+    clearHighlight();
     histIdxRef.current++;
     elementsRef.current = cloneElements(h[histIdxRef.current]);
     selectedRef.current.clear();
@@ -696,15 +742,19 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
         const pts = (el as LinearElement).points;
         pts[pts.length - 1] = [wp.x - el.x, wp.y - el.y];
       } else if (el.type === "freedraw") {
-        (el as FreedrawElement).points.push({ x: wp.x - el.x, y: wp.y - el.y, t: performance.now() });
+        const coalesced = e.nativeEvent.getCoalescedEvents?.() ?? [];
+        const samples = coalesced.length ? coalesced : [e.nativeEvent];
+        const rect = canvasRef.current!.getBoundingClientRect();
         const recognitionStroke = recognitionStrokesRef.current[el.id];
-        recognitionStroke?.push({
-          x: wp.x,
-          y: wp.y,
-          t: Date.now(),
-          p: e.pressure > 0 ? e.pressure : 0.5,
-          pointerType: e.pointerType || "mouse",
-        });
+        for (const sample of samples) {
+          const point = screenToWorld(sample.clientX - rect.left, sample.clientY - rect.top, cam);
+          (el as FreedrawElement).points.push({ x: point.x - el.x, y: point.y - el.y, t: sample.timeStamp });
+          recognitionStroke?.push({
+            x: point.x, y: point.y, t: performance.timeOrigin + sample.timeStamp,
+            p: sample.pressure > 0 ? sample.pressure : 0.5,
+            pointerType: sample.pointerType || "mouse",
+          });
+        }
       }
       render();
     } else if (act.type === "moving") {
@@ -834,6 +884,7 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
       if (el?.type === "freedraw" && !el.isDeleted) scheduleRecognition(el.id);
     }
 
+    if (act.type === "resizing") clearHighlight();
     if (act.type === "moving" || act.type === "erasing" || (act.type === "resizing" && act.target !== SCREENSHOT_ID)) pushHistory();
     if (act.type === "marquee") marqueeRef.current = null;
     actionRef.current = { type: "none" };
@@ -1078,6 +1129,7 @@ export default function InfiniteCanvas({ dark, screenshot }: InfiniteCanvasProps
 
       {/* ── tutor layer (recognized math + tutor annotations) ─── */}
       <TutorOverlay camera={overlayCamera} />
+      <ProblemFocus camera={overlayCamera} />
 
       <div className="canvas-topline">
         {screenshot && <button className="show-question" onClick={() => {

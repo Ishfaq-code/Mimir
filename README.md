@@ -2,9 +2,9 @@
 
 Mimir is an iPad-oriented AI math tutor project: students write on an infinite canvas and the planned tutor guides them through live conversation and annotations.
 
-**Current state:** paste a screenshot onto the canvas with ⌘V / Ctrl+V or the Paste screenshot button. The app reads it locally and shows the recognized text in a floating chip with tap-to-edit; edits update the tutor's context immediately. The original image stays on the canvas with Pen/Eraser/Text, undo/redo, and light/dark themes. A floating Mimir orb starts and ends the voice tutor; a screen-edge aura shows while it is live. There are no preset questions or prepared hints.
+**Current state:** paste a screenshot onto the canvas with ⌘V / Ctrl+V or the Paste screenshot button. The app reads it locally and shows the recognized text in a floating chip with tap-to-edit; edits update the tutor's context immediately. The original image stays on the canvas with Pen/Eraser/Text, undo/redo, and light/dark themes. A floating Mimir orb starts and ends the voice tutor; a screen-edge aura shows while it is live. There are no preset questions or canned hints.
 
-Screenshot OCR uses Tesseract.js in a browser worker and needs no API key. It is intended for printed English and simple algebra. Fractions, exponents, diagrams, and handwriting can need manual correction. Nothing is uploaded for OCR. Confirmed text is shared with the voice tutor only when a voice session is started. MyScript handwriting conversion and LiveKit/OpenAI voice still require their own provider configuration. Reload clears the visit.
+Screenshot OCR uses Tesseract.js in a browser worker and needs no API key. It is intended for printed English and simple algebra. Fractions, exponents, diagrams, and handwriting can need manual correction. Nothing is uploaded for OCR. While a tutor session is active, the tutor can request an image of the visible whiteboard (pasted image, text and original pen strokes) through LiveKit and send it to OpenAI for visual understanding. No desktop screen sharing is used. MyScript handwriting conversion and LiveKit/OpenAI voice still require their own provider configuration. Reload clears the visit.
 
 ## Project references
 
@@ -92,3 +92,20 @@ Backend health:
 ```bash
 curl -fsS http://localhost:8000/health
 ```
+
+
+## Inline voice and learning support
+
+On `tutor/refinements`, Learning tools in the header adjusts captions, reading size/spacing, motion and teaching pace. The orb starts a conversation; Use keyboard starts without requesting microphone access. The compact voice dock has Next hint, Read question, another explanation, typed messages, microphone mute and pause/resume.
+
+During an active tutor session, the agent prepares one checked hint after the visible board settles. A cheap revision check lets ordinary hint requests reuse it; edits, focus, viewport changes and pause invalidate preparation. Unchanged images and their region IDs are cached. Preparation uses the Responses API (`TUTOR_REASONING_MODEL`, default `gpt-5.4-mini`; `TUTOR_REASONING_EFFORT`, default `low`). Specific or ambiguous questions still use the full planner, while unambiguous short answers to a grounded numeric subexpression can be checked locally. A bounded AST/Fraction checker verifies basic arithmetic, polynomial identities and linear equation transformations without executing generated code. This reduces errors; it is not a guarantee of mathematical or visual accuracy.
+
+Checked lines use streaming speech synthesis (`TUTOR_TTS_MODEL`, default `gpt-4o-mini-tts`; `TUTOR_VOICE`, default `marin`) instead of asking Realtime to generate another answer. Hint audio and eligible confirmation lines are prepared in advance and kept in a bounded in-memory cache. Realtime still handles live audio input and the initial greeting. No new credentials are needed.
+
+The worker logs the response route, board/preparation wait, model check, annotation, final-transcript delay and speech startup without student content in those measurements. Pen input retains coalesced samples and paints once per animation frame. Handwriting regions are grouped by actual stroke proximity, and highlights recolor selected stroke IDs rather than every stroke inside an overlapping rectangle. See `docs/PROJECT_CONTEXT.md` for measured handwriting checks and device limits.
+
+Use **Focus a problem** to drag around the problem and working area when several questions share the board. The tutor receives a crop of that area. Without focus it sees the current viewport and asks which problem when ambiguous. Temporary emphasis recolors visible ink/text/image symbols purple; source content stays unchanged. After a correct answer it can place one equivalent equation with a blank for handwriting in unoccupied space. Tutor steps have a remove button.
+
+Replies are interruptible and microphone audio stays live while the tutor speaks. A speech-start event lasting 150ms cancels pending math and stops speech without waiting for the final transcript. Server VAD retains its .75 activation threshold, noise reduction and 350ms end-of-turn silence. Very brief speech-detection blips are ignored; sustained background speech can still interrupt. Exact stop/repeat/greeting/thanks controls bypass vision. Automatic Realtime math answers remain disabled. Actual room noise and iPad microphone behavior still require device testing. Background preparation is silent, only runs in an active session, waits for settled ink, and starts at most once per four seconds. It does not automatically speak corrections while the student writes.
+
+Checks: `cd agent && .venv/bin/python -m unittest discover -s tests -v`; `cd frontend && node scripts/test-board-support.mjs`; frontend lint, TypeScript and production build.

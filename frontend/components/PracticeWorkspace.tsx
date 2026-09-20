@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import LearningControls from "./LearningControls";
+import { loadPreferences, useLearningPreferences } from "@/lib/tutor/support";
 import { AnimatePresence } from "motion/react";
 import { useScreenshotQuestion } from "@/lib/useScreenshotQuestion";
 import InfiniteCanvas from "./InfiniteCanvas";
@@ -9,6 +11,8 @@ import QuestionChip from "./QuestionChip";
 import Icon, { MimirMark } from "./Icon";
 
 export default function PracticeWorkspace() {
+  const preferences = useLearningPreferences();
+  useEffect(() => { loadPreferences(); }, []);
   const [dark, setDark] = useState(false);
   const [pasting, setPasting] = useState(false);
   const question = useScreenshotQuestion();
@@ -48,12 +52,13 @@ export default function PracticeWorkspace() {
   }
 
   return (
-    <div className="practice-app" data-theme={dark ? "dark" : "light"}>
+    <div className="practice-app" data-theme={dark ? "dark" : "light"} data-calm={preferences.calm} data-large-text={preferences.largeText} data-roomy-text={preferences.roomyText}>
       <header className="app-header">
         <div className="wordmark" aria-label="Mimir"><span className="brand-symbol"><MimirMark /></span>mimir<span className="brand-period">.</span></div>
         <div className="header-actions">
           <button className="paste-button" aria-label="Paste screenshot" onClick={() => void pasteScreenshot()} disabled={pasting}><Icon name="clipboard" size={17}/><span>Paste screenshot</span></button>
-          <button className="icon-button theme-toggle" onClick={() => setDark(value => !value)} aria-label={dark ? "Use light theme" : "Use light theme"}><Icon name={dark ? "sun" : "moon"} size={19}/></button>
+          <LearningControls />
+          <button className="icon-button theme-toggle" onClick={() => setDark(value => !value)} aria-label={dark ? "Use light theme" : "Use dark theme"}><Icon name={dark ? "sun" : "moon"} size={19}/></button>
         </div>
       </header>
       <div className="workspace-layout">

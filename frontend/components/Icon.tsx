@@ -1,6 +1,12 @@
 import type { CSSProperties } from "react";
 
 const paths = {
+  tune: <><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2" fill="var(--surface)"/><circle cx="16" cy="12" r="2" fill="var(--surface)"/><circle cx="10" cy="18" r="2" fill="var(--surface)"/></>,
+  volume: <><path d="m11 4-5 4H3v8h3l5 4V4Z"/><path d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></>,
+  pause: <><path d="M8 4v16M16 4v16" strokeWidth="3"/></>,
+  play: <path d="m8 4 12 8-12 8V4Z"/>,
+  micOff: <><path d="m3 3 18 18M9 9v3a3 3 0 0 0 5 2M9 5a3 3 0 0 1 6 0v5M5 10v2a7 7 0 0 0 12 5M12 19v3m-4 0h8"/></>,
+  arrowUp: <path d="M12 20V4m-6 6 6-6 6 6"/>,
   text: <><path d="M4 6V3h16v3M12 3v18m-4 0h8"/></>,
   select: <><path d="m5 3 5.5 14 2.5-5 5-2.5L5 3Z"/><path d="m13 14 4 5"/></>,
   clipboard: <><rect x="5" y="5" width="14" height="16" rx="2"/><rect x="9" y="2" width="6" height="5" rx="1"/><path d="M9 12h6m-6 4h4"/></>,
