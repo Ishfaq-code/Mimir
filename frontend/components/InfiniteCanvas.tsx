@@ -3,7 +3,7 @@
 /* This canvas intentionally keeps its hot interaction state in refs. */
 /* eslint-disable react-hooks/refs */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import katex from "katex";
 import type {
   Camera,
@@ -16,6 +16,7 @@ import type {
   Tool,
 } from "@/lib/canvas/types";
 import { DEFAULT_STYLE, pointXY } from "@/lib/canvas/types";
+import { textWrapWidth, wrapPlainText } from "@/lib/canvas/text";
 import { renderScene, type CanvasScreenshot } from "@/lib/canvas/renderer";
 import { captureScene, snapToInk } from "@/lib/canvas/capture";
 import { registerBoardSource, clearHighlight, getHighlight, subscribeHighlight, getFocus } from "@/lib/tutor/boardView";
@@ -34,6 +35,8 @@ import ProblemFocus from "./ProblemFocus";
 import TutorOverlay from "./TutorOverlay";
 import CanvasTextEditor, { type TextDraft } from "./CanvasTextEditor";
 import GraphOverlay, { type GraphInstance } from "./GraphOverlay";
+import VisualizationOverlay, { type VisualizationEmbed } from "./VisualizationOverlay";
+import type { VisualizationData } from "./VisualizationResult";
 
 
 // ── helpers (module‑level, no closures) ─────────────────────────────
@@ -137,6 +140,17 @@ function cloneElements(els: CanvasElement[]): CanvasElement[] {
   });
 }
 
+const ELEMENT_CLIPBOARD_MARK = "mimir/elements-v1:";
+let elementClipboard: CanvasElement[] = [];
+
+function clipboardCopies(elements: CanvasElement[], ids: Set<string>) {
+  return cloneElements(elements.filter(el => ids.has(el.id) && !el.isDeleted));
+}
+
+function pasteClones(elements: CanvasElement[], dx: number, dy: number) {
+  return cloneElements(elements).map(el => ({ ...el, id: genId(), x: el.x + dx, y: el.y + dy, isDeleted: false }));
+}
+
 // ── interaction action ──────────────────────────────────────────────
 
 type Action =
@@ -210,11 +224,16 @@ const RECOGNITION_PAUSE_MS = Number(process.env.NEXT_PUBLIC_RECOGNITION_PAUSE_MS
 interface InfiniteCanvasProps {
   dark: boolean;
   screenshot: Screenshot | null;
-  questionText: string | null;
   onVisualizeRequest: (problem: string) => void;
+  onPasteImage?: (file: Blob) => void;
+  onRemoveScreenshot?: () => void;
 }
 
-export default function InfiniteCanvas({ dark, screenshot, questionText, onVisualizeRequest }: InfiniteCanvasProps) {
+export interface InfiniteCanvasHandle {
+  embedVisualization: (problem: string, data: VisualizationData) => void;
+}
+
+const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(function InfiniteCanvas({ dark, screenshot, onVisualizeRequest, onPasteImage, onRemoveScreenshot }, ref) {
   // ── refs ────────────────────────────────────────────────────────
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -264,6 +283,8 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
   const [graphs, setGraphs] = useState<GraphInstance[]>([]);
   const graphsRef = useRef(graphs);
   useEffect(() => { graphsRef.current = graphs; }, [graphs]);
+  const [vizEmbeds, setVizEmbeds] = useState<VisualizationEmbed[]>([]);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number; canEdit: boolean } | null>(null);
   const [selectedLatexIds, setSelectedLatexIds] = useState<Set<string>>(new Set());
   const [erasing, setErasing] = useState(false);
   const erasingRef = useRef(false);
@@ -335,6 +356,34 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
 
   const resizeGraph = useCallback((graphId: string, w: number, h: number) => {
     setGraphs((prev) => prev.map((g) => g.id === graphId ? { ...g, w, h } : g));
+  }, []);
+
+  const embedVisualization = useCallback((problem: string, data: VisualizationData) => {
+    const cam = cameraRef.current;
+    const cvs = canvasRef.current;
+    const viewW = (cvs?.clientWidth ?? 800) / cam.zoom;
+    const viewH = (cvs?.clientHeight ?? 600) / cam.zoom;
+    const w = Math.min(520, viewW * 0.58);
+    const h = Math.min(400, viewH * 0.62);
+    const x = cam.x + Math.max(20, (viewW - w) / 2);
+    const y = cam.y + Math.max(20, (viewH - h) / 2);
+    setVizEmbeds(prev => [...prev.filter(item => item.problem !== problem), {
+      id: `viz_${Date.now().toString(36)}`, problem, data, x, y, w, h,
+    }]);
+  }, []);
+
+  useImperativeHandle(ref, () => ({ embedVisualization }), [embedVisualization]);
+
+  const closeVizEmbed = useCallback((id: string) => {
+    setVizEmbeds(prev => prev.filter(item => item.id !== id));
+  }, []);
+
+  const moveVizEmbed = useCallback((id: string, x: number, y: number) => {
+    setVizEmbeds(prev => prev.map(item => item.id === id ? { ...item, x, y } : item));
+  }, []);
+
+  const resizeVizEmbed = useCallback((id: string, w: number, h: number) => {
+    setVizEmbeds(prev => prev.map(item => item.id === id ? { ...item, w, h } : item));
   }, []);
 
   // ── render ──────────────────────────────────────────────────────
@@ -652,6 +701,7 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
   const syncScene = useCallback(() => {
     lastInteractionRef.current = performance.now();
     setHistoryState({ canUndo: histIdxRef.current > 0, canRedo: histIdxRef.current < historyRef.current.length - 1 });
+    setOverlayVersion(version => version + 1);
   }, []);
 
   // ── history ─────────────────────────────────────────────────────
@@ -717,6 +767,107 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
     syncScene();
     render();
   }, [render, syncScene, reconcileOverlays, latexEnabled, scheduleRecognition]);
+
+  const copySelection = useCallback(() => {
+    const copies = clipboardCopies(elementsRef.current, selectedRef.current);
+    if (copies.length) elementClipboard = copies;
+    const image = selectedScreenshotRef.current ? screenshotRef.current?.image : null;
+    if (!copies.length && !image) return;
+    void (async () => {
+      try {
+        const parts: Record<string, Blob> = {};
+        if (copies.length) parts["text/plain"] = new Blob([ELEMENT_CLIPBOARD_MARK + JSON.stringify(copies)], { type: "text/plain" });
+        if (image) {
+          const canvas = document.createElement("canvas");
+          canvas.width = image.naturalWidth;
+          canvas.height = image.naturalHeight;
+          canvas.getContext("2d")?.drawImage(image, 0, 0);
+          const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, "image/png"));
+          if (blob) parts["image/png"] = blob;
+        }
+        if (Object.keys(parts).length) await navigator.clipboard.write([new ClipboardItem(parts)]);
+        else if (copies.length) await navigator.clipboard.writeText(ELEMENT_CLIPBOARD_MARK + JSON.stringify(copies));
+      } catch {
+        if (copies.length) void navigator.clipboard?.writeText?.(ELEMENT_CLIPBOARD_MARK + JSON.stringify(copies)).catch(() => {});
+      }
+    })();
+  }, []);
+
+  const deleteSelection = useCallback(() => {
+    const removeImage = selectedScreenshotRef.current;
+    if (!selectedRef.current.size && !removeImage) return;
+    if (selectedRef.current.size) {
+      const deletedIds = [...selectedRef.current];
+      for (const el of elementsRef.current) if (selectedRef.current.has(el.id)) el.isDeleted = true;
+      const survivors = removeLatexOverlays(deletedIds);
+      if (survivors.length) setTimeout(() => sendRecognition(survivors), 300);
+      selectedRef.current.clear();
+      setSelectedLatexIds(new Set());
+      pushHistory();
+    }
+    if (removeImage) {
+      selectedScreenshotRef.current = false;
+      onRemoveScreenshot?.();
+    }
+    render();
+  }, [removeLatexOverlays, sendRecognition, pushHistory, render, onRemoveScreenshot]);
+
+  const cutSelection = useCallback(() => {
+    copySelection();
+    deleteSelection();
+  }, [copySelection, deleteSelection]);
+
+  const placeElements = useCallback((copies: CanvasElement[], worldX: number, worldY: number) => {
+    const dx = worldX - Math.min(...copies.map(el => el.x));
+    const dy = worldY - Math.min(...copies.map(el => el.y));
+    const next = pasteClones(copies, dx, dy);
+    elementsRef.current.push(...next);
+    selectedRef.current = new Set(next.map(el => el.id));
+    selectedScreenshotRef.current = false;
+    setTool("select");
+    pushHistory();
+    render();
+  }, [pushHistory, render, setTool]);
+
+  const pasteAt = useCallback(async (worldX: number, worldY: number) => {
+    if (elementClipboard.length) {
+      placeElements(elementClipboard, worldX, worldY);
+      return;
+    }
+    try {
+      const text = (await navigator.clipboard?.readText?.())?.trim() ?? "";
+      if (text.startsWith(ELEMENT_CLIPBOARD_MARK)) {
+        const parsed = JSON.parse(text.slice(ELEMENT_CLIPBOARD_MARK.length)) as CanvasElement[];
+        if (Array.isArray(parsed) && parsed.length) {
+          elementClipboard = parsed;
+          placeElements(parsed, worldX, worldY);
+          return;
+        }
+      }
+      if (text) {
+        const canvas = canvasRef.current;
+        const ctx = ctxRef.current;
+        if (!canvas || !ctx) return;
+        const wrapped = wrapPlainText(ctx, text, 20, textWrapWidth(canvas.clientWidth, cameraRef.current.zoom));
+        const el: TextElement = { id: genId(), type: "text", x: worldX, y: worldY, width: wrapped.width, height: wrapped.height, text: wrapped.text, fontSize: 20, style: { ...styleRef.current }, isDeleted: false };
+        elementsRef.current.push(el);
+        selectedRef.current = new Set([el.id]);
+        selectedScreenshotRef.current = false;
+        setTool("select");
+        pushHistory();
+        render();
+        return;
+      }
+      const items = await navigator.clipboard?.read?.();
+      if (!items || !onPasteImage) return;
+      for (const item of items) {
+        const type = item.types.find(value => value.startsWith("image/"));
+        if (type) { onPasteImage(await item.getType(type)); return; }
+      }
+    } catch {
+      return;
+    }
+  }, [placeElements, onPasteImage, pushHistory, render, setTool]);
 
   // ── coordinate helper ───────────────────────────────────────────
   const screenPos = (e: { clientX: number; clientY: number }) => {
@@ -858,6 +1009,7 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
           x: existing?.x ?? wp.x, y: existing?.y ?? wp.y,
           text: existing?.text ?? "", color: existing?.style.strokeColor ?? styleRef.current.strokeColor,
           fontSize: existing?.fontSize ?? 20,
+          wrapWidth: textWrapWidth(canvasRef.current?.clientWidth ?? 640, cameraRef.current.zoom, existing?.width),
         };
         textDraftRef.current = draft;
         setEditingText(draft);
@@ -1092,22 +1244,19 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
       render();
       return;
     }
-    if (existing?.type === "text" && existing.text === val) { render(); return; }
     const ctx = ctxRef.current;
     const fontSize = draft.fontSize;
-    let w = 100, h = fontSize * 1.2;
-    if (ctx) {
-      ctx.save();
-      ctx.font = `${fontSize}px sans-serif`;
-      const lines = val.split("\n");
-      w = Math.max(...lines.map((l) => ctx.measureText(l).width), 10);
-      h = lines.length * fontSize * 1.2;
-      ctx.restore();
+    const wrapped = ctx
+      ? wrapPlainText(ctx, val, fontSize, draft.wrapWidth)
+      : { text: val, width: Math.max(100, draft.wrapWidth), height: fontSize * 1.2 };
+    if (existing?.type === "text" && existing.text === wrapped.text && existing.width === wrapped.width && existing.height === wrapped.height) {
+      render();
+      return;
     }
     if (existing?.type === "text") {
-      Object.assign(existing, { text: val, width: w, height: h });
+      Object.assign(existing, { text: wrapped.text, width: wrapped.width, height: wrapped.height });
     } else {
-      const el: TextElement = { id: genId(), type: "text", x: draft.x, y: draft.y, width: w, height: h, text: val, fontSize, style: { ...styleRef.current, strokeColor: draft.color }, isDeleted: false };
+      const el: TextElement = { id: genId(), type: "text", x: draft.x, y: draft.y, width: wrapped.width, height: wrapped.height, text: wrapped.text, fontSize, style: { ...styleRef.current, strokeColor: draft.color }, isDeleted: false };
       elementsRef.current.push(el);
     }
     pushHistory();
@@ -1116,34 +1265,37 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
 
   useEffect(() => {
     const pasteText = (event: ClipboardEvent) => {
+      if (textDraftRef.current || document.activeElement instanceof HTMLTextAreaElement || document.activeElement instanceof HTMLInputElement) return;
       if (document.querySelector('[aria-modal="true"]') ||
           (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable=true]'))) return;
       if (Array.from(event.clipboardData?.items ?? []).some(item => item.type.startsWith("image/"))) return;
-      const text = event.clipboardData?.getData("text/plain").trim();
+      const text = event.clipboardData?.getData("text/plain").trim() ?? "";
+      const camera = cameraRef.current;
+      const at = { x: camera.x + 32 / camera.zoom, y: camera.y + 112 / camera.zoom };
+      if (text.startsWith(ELEMENT_CLIPBOARD_MARK)) {
+        try {
+          const parsed = JSON.parse(text.slice(ELEMENT_CLIPBOARD_MARK.length)) as CanvasElement[];
+          if (Array.isArray(parsed) && parsed.length) {
+            event.preventDefault();
+            elementClipboard = parsed;
+            placeElements(parsed, at.x, at.y);
+            return;
+          }
+        } catch { /* fall through to plain text */ }
+      }
+      if (!text && elementClipboard.length) {
+        event.preventDefault();
+        placeElements(elementClipboard, at.x, at.y);
+        return;
+      }
       const canvas = canvasRef.current;
       const ctx = ctxRef.current;
       if (!text || !canvas || !ctx) return;
       event.preventDefault();
-      const camera = cameraRef.current;
       const fontSize = 20;
-      const maxWidth = Math.max(160, Math.min(560, (canvas.clientWidth - 64) / camera.zoom));
-      ctx.save();
-      ctx.font = `${fontSize}px sans-serif`;
-      const lines: string[] = [];
-      for (const paragraph of text.split("\n")) {
-        let line = "";
-        for (const word of paragraph.split(/\s+/)) {
-          const next = line ? `${line} ${word}` : word;
-          if (line && ctx.measureText(next).width > maxWidth) { lines.push(line); line = word; }
-          else line = next;
-        }
-        lines.push(line);
-      }
-      const width = Math.max(10, ...lines.map(line => ctx.measureText(line).width));
-      ctx.restore();
-      elementsRef.current.push({ id: genId(), type: "text", x: camera.x + 32 / camera.zoom,
-        y: camera.y + 112 / camera.zoom, width, height: lines.length * fontSize * 1.2,
-        text: lines.join("\n"), fontSize, style: { ...styleRef.current }, isDeleted: false });
+      const wrapped = wrapPlainText(ctx, text, fontSize, textWrapWidth(canvas.clientWidth, camera.zoom));
+      elementsRef.current.push({ id: genId(), type: "text", x: at.x, y: at.y, width: wrapped.width, height: wrapped.height,
+        text: wrapped.text, fontSize, style: { ...styleRef.current }, isDeleted: false });
       selectedRef.current.clear();
       selectedScreenshotRef.current = false;
       setTool("select");
@@ -1152,15 +1304,18 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
     };
     window.addEventListener("paste", pasteText);
     return () => window.removeEventListener("paste", pasteText);
-  }, [pushHistory, render, setTool]);
+  }, [pushHistory, render, setTool, placeElements]);
 
-  const visualizeSelection = useCallback(() => {
-    const selectedText = elementsRef.current.find((element): element is TextElement =>
-      selectedRef.current.has(element.id) && element.type === "text" && !element.isDeleted,
-    );
-    const problem = selectedText?.text.trim() || (selectedScreenshotRef.current ? questionText?.trim() : "");
-    onVisualizeRequest(problem || "");
-  }, [questionText, onVisualizeRequest]);
+  const visualizeTargets = useMemo(() => {
+    void overlayVersion;
+    const items: { id: string; problem: string; x: number; y: number; w: number }[] = [];
+    for (const element of elementsRef.current) {
+      if (element.type !== "text" || element.isDeleted || !element.text.trim()) continue;
+      if (editingText?.elementId === element.id) continue;
+      items.push({ id: element.id, problem: element.text.trim(), x: element.x, y: element.y, w: element.width });
+    }
+    return items;
+  }, [editingText, overlayVersion]);
 
   // ── effects ─────────────────────────────────────────────────────
 
@@ -1252,18 +1407,14 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
         if (map[k]) { setTool(map[k]); return; }
       }
 
-      if ((k === "delete" || k === "backspace") && selectedRef.current.size) {
-        const deletedIds = [...selectedRef.current];
-        for (const el of elementsRef.current) if (selectedRef.current.has(el.id)) el.isDeleted = true;
-        const survivors = removeLatexOverlays(deletedIds);
-        if (survivors.length) setTimeout(() => sendRecognition(survivors), 300);
-        selectedRef.current.clear();
-        setSelectedLatexIds(new Set());
-        pushHistory();
-        render();
+      if ((k === "delete" || k === "backspace") && (selectedRef.current.size || selectedScreenshotRef.current)) {
+        e.preventDefault();
+        deleteSelection();
         return;
       }
 
+      if ((e.ctrlKey || e.metaKey) && k === "c") { e.preventDefault(); copySelection(); return; }
+      if ((e.ctrlKey || e.metaKey) && k === "x") { e.preventDefault(); cutSelection(); return; }
       if ((e.ctrlKey || e.metaKey) && k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       if ((e.ctrlKey || e.metaKey) && k === "z" && e.shiftKey) { e.preventDefault(); redo(); }
       if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); redo(); }
@@ -1272,7 +1423,7 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
-  }, [editingText, setTool, pushHistory, render, undo, redo, removeLatexOverlays, sendRecognition]);
+  }, [editingText, setTool, undo, redo, copySelection, cutSelection, deleteSelection]);
 
   // Theme changes update the next neutral pen color, never stored ink.
   useEffect(() => {
@@ -1283,6 +1434,18 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
     }
     render();
   }, [dark, render, updateStyle]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest(".canvas-menu")) return;
+      setContextMenu(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setContextMenu(null); };
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => { window.removeEventListener("pointerdown", close); window.removeEventListener("keydown", closeOnEscape); };
+  }, [contextMenu]);
 
   // ── zoom helpers for UI buttons ─────────────────────────────────
 
@@ -1346,6 +1509,42 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onContextMenu={event => {
+          event.preventDefault();
+          const sp = screenPos(event);
+          const wp = screenToWorld(sp.x, sp.y, cameraRef.current);
+          const latexHit = Object.values(latexOverlaysRef.current).reverse().find(overlay => pointInBounds(wp, overlay.bounds, 10 / cameraRef.current.zoom));
+          const hit = latexHit ? null : hitTest(elementsRef.current, wp.x, wp.y);
+          const screenshotHit = !hit && !latexHit && screenshotRef.current && pointInBounds(wp, screenshotBounds(screenshotRef.current), 10 / cameraRef.current.zoom);
+          if (hit && !selectedRef.current.has(hit.id)) {
+            selectedRef.current.clear();
+            selectedScreenshotRef.current = false;
+            selectedRef.current.add(hit.id);
+            syncSelectedLatex();
+            render();
+          } else if (latexHit && !latexHit.strokeIds.every(id => selectedRef.current.has(id))) {
+            selectedRef.current.clear();
+            selectedScreenshotRef.current = false;
+            latexHit.strokeIds.forEach(id => selectedRef.current.add(id));
+            syncSelectedLatex();
+            render();
+          } else if (screenshotHit && !selectedScreenshotRef.current) {
+            selectedRef.current.clear();
+            selectedScreenshotRef.current = true;
+            syncSelectedLatex();
+            render();
+          }
+          const stage = event.currentTarget.parentElement?.getBoundingClientRect();
+          const menuW = 188;
+          const menuH = 176;
+          setContextMenu({
+            x: Math.max(8, Math.min(event.clientX - (stage?.left ?? 0), (stage?.width ?? 320) - menuW - 8)),
+            y: Math.max(8, Math.min(event.clientY - (stage?.top ?? 0), (stage?.height ?? 240) - menuH - 8)),
+            worldX: wp.x,
+            worldY: wp.y,
+            canEdit: selectedRef.current.size > 0 || selectedScreenshotRef.current,
+          });
+        }}
         aria-label="Drawing canvas"
       />
 
@@ -1410,6 +1609,9 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
       {graphs.map((graph) => (
         <GraphOverlay key={`${graph.id}:${graph.latex}`} graph={graph} camera={overlayCamera} dark={dark} onClose={() => closeGraph(graph.id)} onMove={moveGraph} onResize={resizeGraph} />
       ))}
+      {vizEmbeds.map(embed => (
+        <VisualizationOverlay key={embed.id} embed={embed} camera={overlayCamera} onClose={() => closeVizEmbed(embed.id)} onMove={moveVizEmbed} onResize={resizeVizEmbed} />
+      ))}
 
       <div className="canvas-topline">
         {screenshot && <button className="show-question" onClick={() => {
@@ -1424,10 +1626,35 @@ export default function InfiniteCanvas({ dark, screenshot, questionText, onVisua
       </div>
       {recognitionError && <div className="recognition-notice" role="status">Couldn’t convert that yet. Your handwriting is safe.<button onClick={retryRecognition}>Try again</button></div>}
 
-      <IslandToolbar tool={tool} onToolChange={setTool} style={style} onStyleChange={updateStyle} onUndo={undo} onRedo={redo} onVisualize={visualizeSelection} canUndo={historyState.canUndo} canRedo={historyState.canRedo} hasSelectedLatex={hasSelectedLatex} onGraph={createGraph}/>
+      {visualizeTargets.map(target => (
+        <button
+          key={target.id}
+          type="button"
+          className="textbox-visualize"
+          style={{
+            left: (target.x + target.w - overlayCamera.x) * overlayCamera.zoom,
+            top: (target.y - overlayCamera.y) * overlayCamera.zoom,
+          }}
+          onPointerDown={event => event.stopPropagation()}
+          onClick={() => onVisualizeRequest(target.problem)}
+          aria-label="Visualize this problem"
+        >
+          <Icon name="visual" size={15}/>
+          Visualize
+        </button>
+      ))}
+      <IslandToolbar tool={tool} onToolChange={setTool} style={style} onStyleChange={updateStyle} onUndo={undo} onRedo={redo} canUndo={historyState.canUndo} canRedo={historyState.canRedo} hasSelectedLatex={hasSelectedLatex} onGraph={createGraph}/>
       <div className="canvas-footer"><div className="zoom-controls"><button className="icon-button" type="button" onClick={() => zoomTo(Math.max(0.1, cameraRef.current.zoom / 1.25))} aria-label="Zoom out"><Icon name="minus" size={16}/></button><button className="zoom-percentage" type="button" onClick={() => zoomTo(1)} aria-label="Reset zoom to 100 percent">{zoom}%</button><button className="icon-button" type="button" onClick={() => zoomTo(Math.min(10, cameraRef.current.zoom * 1.25))} aria-label="Zoom in"><Icon name="plus" size={16}/></button></div></div>
 
-      {editingText && <CanvasTextEditor key={editingText.key} draft={editingText} camera={overlayCamera} onCommit={finalizeText} onCancel={cancelText}/>}
+      {editingText && <CanvasTextEditor key={editingText.key} draft={editingText} camera={overlayCamera} onCommit={finalizeText} onCancel={cancelText} onVisualize={onVisualizeRequest}/>}
+      {contextMenu && <div className="canvas-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={event => event.stopPropagation()}>
+        <button type="button" role="menuitem" disabled={!contextMenu.canEdit} onClick={() => { copySelection(); setContextMenu(null); }}>Copy <kbd>⌘C</kbd></button>
+        <button type="button" role="menuitem" onClick={() => { void pasteAt(contextMenu.worldX, contextMenu.worldY); setContextMenu(null); }}>Paste <kbd>⌘V</kbd></button>
+        <button type="button" role="menuitem" disabled={!contextMenu.canEdit} onClick={() => { cutSelection(); setContextMenu(null); }}>Cut <kbd>⌘X</kbd></button>
+        <button type="button" role="menuitem" disabled={!contextMenu.canEdit} onClick={() => { deleteSelection(); setContextMenu(null); }}>Delete</button>
+      </div>}
     </div>
   );
-}
+});
+
+export default InfiniteCanvas;

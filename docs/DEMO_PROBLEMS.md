@@ -1,6 +1,6 @@
 # Demo problems
 
-Copy a paragraph, paste it onto the canvas with Ctrl+V / ⌘V, click the pasted textbox with Select, then click Visualize. These are examples, not special cases: every problem uses the configured OpenRouter API. Change the numbers, wording, or object to explore another single-object kinematics problem. The model extracts the given values; validated equations produce the frames.
+Copy a paragraph, paste it onto the canvas with Ctrl+V / ⌘V, then click Visualize on the textbox. These four problems use cached frames and do not call the visualization API. Change the numbers, wording, or object to explore another single-object kinematics problem; those go through OpenRouter. The model extracts the given values; validated equations produce the frames.
 
 ## Speeding up
 
