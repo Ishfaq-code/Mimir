@@ -18,9 +18,10 @@ import type {
 import { DEFAULT_STYLE, pointXY } from "@/lib/canvas/types";
 import { renderScene } from "@/lib/canvas/renderer";
 import IslandToolbar from "./IslandToolbar";
-import ChatPanel from "./ChatPanel";
+import Icon from "./Icon";
+import { setRecognizedWork } from "@/lib/tutor/store";
 import TutorOverlay from "./TutorOverlay";
-import VoiceTutor from "./VoiceTutor";
+
 
 // ── helpers (module‑level, no closures) ─────────────────────────────
 
@@ -98,41 +99,34 @@ interface RecognitionPoint {
   pointerType: string;
 }
 
-// ── colour / width presets ──────────────────────────────────────────
-
-const STROKE_COLORS = [
-  { name: "Black", color: "#1e1e1e" },
-  { name: "White", color: "#ffffff" },
-  { name: "Red", color: "#e03131" },
-  { name: "Orange", color: "#e8590c" },
-  { name: "Yellow", color: "#fcc419" },
-  { name: "Green", color: "#2f9e44" },
-  { name: "Blue", color: "#1971c2" },
-  { name: "Purple", color: "#7048e8" },
-];
-const STROKE_WIDTHS = [1, 2, 4];
-
 // ═══════════════════════════════════════════════════════════════════
 // Component
 // ═══════════════════════════════════════════════════════════════════
 
-export default function InfiniteCanvas() {
+interface InfiniteCanvasProps {
+  dark: boolean;
+  initialElements: CanvasElement[];
+  onSceneChange: (elements: CanvasElement[]) => void;
+}
+
+export default function InfiniteCanvas({ dark, initialElements, onSceneChange }: InfiniteCanvasProps) {
   // ── refs ────────────────────────────────────────────────────────
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
 
-  const elementsRef = useRef<CanvasElement[]>([]);
+  const elementsRef = useRef<CanvasElement[]>(cloneElements(initialElements));
   const cameraRef = useRef<Camera>({ x: 0, y: 0, zoom: 1 });
   const selectedRef = useRef<Set<string>>(new Set());
   const toolRef = useRef<Tool>("freedraw");
-  const styleRef = useRef<ElementStyle>({ ...DEFAULT_STYLE });
-  const darkRef = useRef(false);
+  const styleRef = useRef<ElementStyle>({ ...DEFAULT_STYLE, strokeColor: dark ? "#ffffff" : DEFAULT_STYLE.strokeColor });
+  const darkRef = useRef(dark);
+  const activePointerRef = useRef<number | null>(null);
 
   const actionRef = useRef<Action>({ type: "none" });
   const curElRef = useRef<CanvasElement | null>(null);
   const spaceRef = useRef(false);
 
-  const historyRef = useRef<CanvasElement[][]>([[]]);
+  const historyRef = useRef<CanvasElement[][]>([cloneElements(initialElements)]);
   const histIdxRef = useRef(0);
   const hiddenMathIdsRef = useRef<Set<string>>(new Set());
   const recognitionSocketRef = useRef<WebSocket | null>(null);
@@ -143,9 +137,11 @@ export default function InfiniteCanvas() {
 
   // ── react state (synced for toolbar / overlays) ─────────────────
   const [tool, _setTool] = useState<Tool>("freedraw");
-  const [style, _setStyle] = useState<ElementStyle>({ ...DEFAULT_STYLE });
+  const [style, _setStyle] = useState<ElementStyle>({ ...DEFAULT_STYLE, strokeColor: dark ? "#ffffff" : DEFAULT_STYLE.strokeColor });
   const [zoom, setZoomUI] = useState(100);
-  const [chatOpen, setChatOpen] = useState(false);
+  const [hasInk, setHasInk] = useState(initialElements.some(el => !el.isDeleted));
+  const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
+  const [recognitionError, setRecognitionError] = useState(false);
   const [latexEnabled, setLatexEnabled] = useState(false);
   const [latexOverlay, setLatexOverlay] = useState<LatexOverlay | null>(null);
   const [recognizing, setRecognizing] = useState(false);
@@ -190,10 +186,13 @@ export default function InfiniteCanvas() {
   }, []);
 
   const clearRecognition = useCallback(() => {
+    if (recognitionTimerRef.current) clearTimeout(recognitionTimerRef.current);
     recognitionRequestRef.current += 1;
     hiddenMathIdsRef.current.clear();
     setLatexOverlay(null);
     setRecognizing(false);
+    setRecognitionError(false);
+    setRecognizedWork(null);
     render();
   }, [render]);
 
@@ -205,9 +204,14 @@ export default function InfiniteCanvas() {
       setRecognizing(false);
       return;
     }
+    if (message.type === "error" && !message.requestId) {
+      setRecognizing(false);
+      setRecognitionError(true);
+      return;
+    }
     if (message.requestId !== String(recognitionRequestRef.current)) return;
     setRecognizing(false);
-    if (message.type === "error" || !message.latex) return;
+    if (message.type === "error" || !message.latex) { setRecognitionError(true); return; }
     const bounds = currentMathBounds();
     if (!bounds) return;
     hiddenMathIdsRef.current = new Set(
@@ -216,6 +220,10 @@ export default function InfiniteCanvas() {
         .map((el) => el.id),
     );
     setLatexOverlay({ latex: message.latex, bounds });
+    setRecognizedWork({ id: "student-work", latex: message.latex,
+      boundingBox: { x: bounds.x, y: bounds.y, width: bounds.w, height: bounds.h },
+      sourceStrokeIds: [...hiddenMathIdsRef.current],
+    });
     render();
   }, [currentMathBounds, render]);
 
@@ -237,6 +245,7 @@ export default function InfiniteCanvas() {
       socket.onerror = () => {
         recognitionConnectRef.current = null;
         setRecognizing(false);
+        setRecognitionError(true);
         reject(new Error("Recognition WebSocket connection failed"));
       };
       socket.onclose = () => {
@@ -266,8 +275,8 @@ export default function InfiniteCanvas() {
     setRecognizing(true);
     recognitionTimerRef.current = setTimeout(() => {
       void connectRecognition()
-        .then((socket) => socket.send(JSON.stringify({ requestId, strokes })))
-        .catch(() => setRecognizing(false));
+        .then((socket) => { if (requestId === String(recognitionRequestRef.current)) socket.send(JSON.stringify({ requestId, strokes })); })
+        .catch(() => { setRecognizing(false); setRecognitionError(true); });
     }, 600);
   }, [connectRecognition, latexEnabled]);
 
@@ -277,6 +286,8 @@ export default function InfiniteCanvas() {
   }, [clearRecognition, latexEnabled]);
 
   useEffect(() => () => {
+    recognitionRequestRef.current += 1;
+    if (recognitionSocketRef.current) recognitionSocketRef.current.onmessage = null;
     if (recognitionTimerRef.current) clearTimeout(recognitionTimerRef.current);
     recognitionSocketRef.current?.close();
   }, []);
@@ -289,13 +300,20 @@ export default function InfiniteCanvas() {
     scheduleRecognition();
   }, [latexEnabled, scheduleRecognition]);
 
+  const syncScene = useCallback(() => {
+    setHasInk(elementsRef.current.some(el => !el.isDeleted));
+    setHistoryState({ canUndo: histIdxRef.current > 0, canRedo: histIdxRef.current < historyRef.current.length - 1 });
+    onSceneChange(cloneElements(elementsRef.current));
+  }, [onSceneChange]);
+
   // ── history ─────────────────────────────────────────────────────
   const pushHistory = useCallback(() => {
     const h = historyRef.current;
     h.length = histIdxRef.current + 1;
     h.push(cloneElements(elementsRef.current));
     histIdxRef.current = h.length - 1;
-  }, []);
+    syncScene();
+  }, [syncScene]);
 
   const undo = useCallback(() => {
     if (histIdxRef.current <= 0) return;
@@ -305,8 +323,10 @@ export default function InfiniteCanvas() {
     recognitionRequestRef.current += 1;
     hiddenMathIdsRef.current.clear();
     setLatexOverlay(null);
+    setRecognizedWork(null);
+    syncScene();
     render();
-  }, [render]);
+  }, [render, syncScene]);
 
   const redo = useCallback(() => {
     const h = historyRef.current;
@@ -317,8 +337,10 @@ export default function InfiniteCanvas() {
     recognitionRequestRef.current += 1;
     hiddenMathIdsRef.current.clear();
     setLatexOverlay(null);
+    setRecognizedWork(null);
+    syncScene();
     render();
-  }, [render]);
+  }, [render, syncScene]);
 
   // ── coordinate helper ───────────────────────────────────────────
   const screenPos = (e: { clientX: number; clientY: number }) => {
@@ -329,6 +351,8 @@ export default function InfiniteCanvas() {
   // ── pointer handlers ────────────────────────────────────────────
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (activePointerRef.current !== null || (e.button !== 0 && e.button !== 1)) return;
+    activePointerRef.current = e.pointerId;
     canvasRef.current?.setPointerCapture(e.pointerId);
     selectedRef.current.clear();
     const sp = screenPos(e);
@@ -336,7 +360,7 @@ export default function InfiniteCanvas() {
     const wp = screenToWorld(sp.x, sp.y, cam);
     const activeTool: Tool = spaceRef.current ? "hand" : toolRef.current;
 
-    if (e.button === 1 || activeTool === "hand") {
+    if (e.button === 1 || activeTool === "hand" || e.pointerType === "touch") {
       actionRef.current = { type: "panning", startCam: { x: cam.x, y: cam.y }, startPtr: sp };
       return;
     }
@@ -401,6 +425,7 @@ export default function InfiniteCanvas() {
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerId !== activePointerRef.current) return;
     const act = actionRef.current;
     if (act.type === "none") return;
     const sp = screenPos(e);
@@ -450,7 +475,9 @@ export default function InfiniteCanvas() {
     }
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerId !== activePointerRef.current) return;
+    activePointerRef.current = null;
     const act = actionRef.current;
 
     if (act.type === "drawing") {
@@ -528,8 +555,10 @@ export default function InfiniteCanvas() {
       render();
     };
     resize();
+    const observer = new ResizeObserver(resize);
+    if (canvasRef.current) observer.observe(canvasRef.current);
     window.addEventListener("resize", resize);
-    return () => window.removeEventListener("resize", resize);
+    return () => { observer.disconnect(); window.removeEventListener("resize", resize); };
   }, [render]);
 
   // wheel (needs { passive: false } for preventDefault)
@@ -562,7 +591,7 @@ export default function InfiniteCanvas() {
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       // skip while editing text
-      if (editingText) return;
+      if (editingText || (e.target instanceof Element && e.target.closest("input, textarea, select, button, [contenteditable=true]"))) return;
       const k = e.key.toLowerCase();
 
       if (k === " ") { spaceRef.current = true; e.preventDefault(); return; }
@@ -590,15 +619,15 @@ export default function InfiniteCanvas() {
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
   }, [editingText, setTool, pushHistory, render, undo, redo]);
 
-  // dark mode
+  // Theme changes update the next neutral pen color, never stored ink.
   useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    darkRef.current = mq.matches;
-    updateStyle({ strokeColor: mq.matches ? "#ffffff" : DEFAULT_STYLE.strokeColor });
-    const h = (e: MediaQueryListEvent) => { darkRef.current = e.matches; render(); };
-    mq.addEventListener("change", h);
-    return () => mq.removeEventListener("change", h);
-  }, [render, updateStyle]);
+    const oldDefault = darkRef.current ? "#ffffff" : DEFAULT_STYLE.strokeColor;
+    darkRef.current = dark;
+    if (styleRef.current.strokeColor === oldDefault) {
+      updateStyle({ strokeColor: dark ? "#ffffff" : DEFAULT_STYLE.strokeColor });
+    }
+    render();
+  }, [dark, render, updateStyle]);
 
   // ── zoom helpers for UI buttons ─────────────────────────────────
 
@@ -648,10 +677,10 @@ export default function InfiniteCanvas() {
   // ── JSX ─────────────────────────────────────────────────────────
 
   return (
-    <div className="relative h-full w-full overflow-hidden">
+    <div className="canvas-stage">
       <canvas
         ref={canvasRef}
-        className="h-full w-full touch-none"
+        className="drawing-surface"
         style={{ cursor }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -662,7 +691,7 @@ export default function InfiniteCanvas() {
 
       {renderedLatex && latexPosition && (
         <div
-          className="pointer-events-none absolute z-10 flex items-center justify-center overflow-visible px-2 text-zinc-900 dark:text-zinc-100"
+          className="recognized-math"
           style={latexPosition}
           dangerouslySetInnerHTML={{ __html: renderedLatex }}
         />
@@ -671,93 +700,13 @@ export default function InfiniteCanvas() {
       {/* ── tutor layer (recognized math + tutor annotations) ─── */}
       <TutorOverlay camera={overlayCamera} />
 
-      <div className="pointer-events-auto absolute right-4 top-4 flex items-center gap-2 rounded-xl bg-white/95 px-3 py-2 text-xs shadow-lg ring-1 ring-black/[.06] backdrop-blur dark:bg-zinc-800/95 dark:ring-white/10">
-        <button
-          type="button"
-          role="switch"
-          aria-checked={latexEnabled}
-          onClick={toggleLatex}
-          className={`relative h-5 w-9 rounded-full transition-colors ${latexEnabled ? "bg-violet-600" : "bg-zinc-300 dark:bg-zinc-600"}`}
-          title="Toggle handwriting to LaTeX"
-        >
-          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${latexEnabled ? "translate-x-4" : "translate-x-0.5"}`} />
-        </button>
-        <span className="text-zinc-600 dark:text-zinc-300">
-          {recognizing ? "Recognizing..." : "Handwriting to LaTeX"}
-        </span>
-      </div>
+      {!hasInk && <div className="canvas-empty"><div className="empty-ink-mark"><svg viewBox="0 0 92 34" fill="none" aria-hidden="true"><path d="M4 25C18 5 29 3 24 18s-14 13-9 5S38 7 42 13s-11 18-8 11S50 6 56 12s-10 17-5 12S66 9 72 16s5 9 16-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg></div><h2>Start with what you know.</h2><p>Your pencil, your pace. There’s room to figure it out.</p></div>}
 
-      {/* ── island toolbar (top centre) ─── */}
-      <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
-        <IslandToolbar tool={tool} onToolChange={setTool} />
-      </div>
+      <div className="canvas-topline"><span className="canvas-label"><span className="small-dot"/>YOUR WORKSPACE</span><button type="button" role="switch" aria-label="Typeset handwriting" aria-checked={latexEnabled} onClick={toggleLatex} className={`latex-toggle ${latexEnabled ? "is-on" : ""}`}><span className="math-symbol">ƒ</span><span>{recognizing ? "Reading your math…" : "Typeset math"}</span><span className="switch-track"><span/></span></button></div>
+      {recognitionError && <div className="recognition-notice" role="status">Couldn’t convert that yet. Your handwriting is safe.<button onClick={scheduleRecognition}>Try again</button></div>}
 
-      {/* ── style panel (left) ──────────── */}
-      <div className="pointer-events-auto absolute left-4 top-20 flex flex-col gap-3 rounded-xl bg-white p-3 shadow-lg ring-1 ring-black/[.06] dark:bg-zinc-800 dark:ring-white/10">
-        <div>
-          <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-zinc-400">Stroke</span>
-          <div className="flex gap-1">
-            {STROKE_COLORS.map(({ name, color: c }) => (
-              <button key={c} type="button" title={`${name} ink`} aria-label={`${name} ink`} aria-pressed={style.strokeColor === c} onClick={() => updateStyle({ strokeColor: c })} className={`h-5 w-5 rounded-full border-2 transition-transform hover:scale-110 ${style.strokeColor === c ? "border-blue-500 scale-110" : "border-zinc-200 dark:border-zinc-600"}`} style={{ backgroundColor: c }} />
-            ))}
-          </div>
-        </div>
-        <div>
-          <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-zinc-400">Width</span>
-          <div className="flex gap-1">
-            {STROKE_WIDTHS.map((w) => (
-              <button key={w} type="button" onClick={() => updateStyle({ strokeWidth: w })} className={`flex h-7 w-9 items-center justify-center rounded-md border text-xs font-medium transition-colors ${style.strokeWidth === w ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300" : "border-zinc-200 text-zinc-500 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-700"}`}>
-                {w}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ── side buttons (left) ─────── */}
-      {!chatOpen && (
-        <div className="pointer-events-auto absolute left-4 top-1/2 flex -translate-y-1/2 flex-col gap-2">
-          <button
-            type="button"
-            onClick={() => setChatOpen(true)}
-            title="Chat"
-            className="flex h-10 w-10 items-center justify-center rounded-xl bg-white shadow-lg ring-1 ring-black/[.06] transition-colors hover:bg-zinc-50 dark:bg-zinc-800 dark:ring-white/10 dark:hover:bg-zinc-700"
-          >
-            <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="text-zinc-600 dark:text-zinc-300">
-              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={() => setChatOpen(true)}
-            title="AI Assistant"
-            className="flex h-10 w-10 items-center justify-center rounded-xl bg-white shadow-lg ring-1 ring-black/[.06] transition-colors hover:bg-zinc-50 dark:bg-zinc-800 dark:ring-white/10 dark:hover:bg-zinc-700"
-          >
-            <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="text-violet-500">
-              <path d="M12 2l2.09 6.26L20 10l-5.91 1.74L12 18l-2.09-6.26L4 10l5.91-1.74z" />
-            </svg>
-          </button>
-        </div>
-      )}
-
-      {/* ── chat panel (left drawer) ──── */}
-      {chatOpen && (
-        <div className="pointer-events-auto absolute bottom-0 left-0 top-0">
-          <ChatPanel onClose={() => setChatOpen(false)} />
-        </div>
-      )}
-
-      {/* ── voice tutor (bottom-right) ── */}
-      <div className="pointer-events-auto absolute bottom-4 right-4">
-        <VoiceTutor />
-      </div>
-
-      {/* ── zoom controls (bottom‑left) ── */}
-      <div className="pointer-events-auto absolute bottom-4 left-4 flex items-center gap-1 rounded-lg bg-white/90 px-2 py-1 text-xs font-medium text-zinc-600 shadow ring-1 ring-black/5 backdrop-blur dark:bg-zinc-800/90 dark:text-zinc-300 dark:ring-white/10">
-        <button type="button" onClick={() => zoomTo(Math.max(0.1, cameraRef.current.zoom / 1.25))} className="px-1 hover:text-black dark:hover:text-white">−</button>
-        <button type="button" onClick={() => zoomTo(1)} className="w-12 text-center hover:text-black dark:hover:text-white">{zoom}%</button>
-        <button type="button" onClick={() => zoomTo(Math.min(10, cameraRef.current.zoom * 1.25))} className="px-1 hover:text-black dark:hover:text-white">+</button>
-      </div>
+      <IslandToolbar tool={tool} onToolChange={setTool} style={style} onStyleChange={updateStyle} onUndo={undo} onRedo={redo} canUndo={historyState.canUndo} canRedo={historyState.canRedo}/>
+      <div className="canvas-footer"><span className="navigation-tip">Space + drag to move <span>·</span> Finger to pan</span><div className="zoom-controls"><button className="icon-button" type="button" onClick={() => zoomTo(Math.max(0.1, cameraRef.current.zoom / 1.25))} aria-label="Zoom out"><Icon name="minus" size={16}/></button><button className="zoom-percentage" type="button" onClick={() => zoomTo(1)} aria-label="Reset zoom to 100 percent">{zoom}%</button><button className="icon-button" type="button" onClick={() => zoomTo(Math.min(10, cameraRef.current.zoom * 1.25))} aria-label="Zoom in"><Icon name="plus" size={16}/></button></div></div>
 
       {/* ── text input overlay ──────────── */}
       {editingText && (

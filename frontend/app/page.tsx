@@ -1,9 +1,5 @@
-import InfiniteCanvas from "@/components/InfiniteCanvas";
+import PracticeWorkspace from "@/components/PracticeWorkspace";
 
 export default function Home() {
-  return (
-    <div className="h-screen w-screen overflow-hidden">
-      <InfiniteCanvas />
-    </div>
-  );
+  return <PracticeWorkspace />;
 }

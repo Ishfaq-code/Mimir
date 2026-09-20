@@ -1,69 +1,49 @@
 "use client";
 
-import type { Tool } from "@/lib/canvas/types";
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { ElementStyle, Tool } from "@/lib/canvas/types";
+import Icon from "./Icon";
+
+const COLORS = [
+  {name:"Black",color:"#1e1e1e"}, {name:"White",color:"#ffffff"},
+  {name:"Green",color:"#2f9e44"}, {name:"Blue",color:"#1971c2"},
+  {name:"Purple",color:"#7048e8"}, {name:"Red",color:"#e03131"},
+  {name:"Orange",color:"#e8590c"}, {name:"Yellow",color:"#fcc419"},
+];
 
 interface IslandToolbarProps {
   tool: Tool;
   onToolChange: (tool: Tool) => void;
+  style: ElementStyle;
+  onStyleChange: (style: Partial<ElementStyle>) => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
-interface ToolDef {
-  id: Tool;
-  label: string;
-  shortcut: string;
-  icon: ReactNode;
-}
+export default function IslandToolbar({tool,onToolChange,style,onStyleChange,onUndo,onRedo,canUndo,canRedo}: IslandToolbarProps) {
+  const [optionsOpen,setOptionsOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    if (!optionsOpen) return;
+    const closeOutside = (event: PointerEvent) => { if (event.target instanceof Node && !root.current?.contains(event.target)) setOptionsOpen(false); };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setOptionsOpen(false); };
+    window.addEventListener("pointerdown",closeOutside);
+    window.addEventListener("keydown",closeOnEscape);
+    return ()=>{ window.removeEventListener("pointerdown",closeOutside);window.removeEventListener("keydown",closeOnEscape); };
+  },[optionsOpen]);
 
-const sz = 18;
-
-/* Simple SVG icons — small, recognisable, no dependencies. */
-
-const tools: ToolDef[] = [
-  {
-    id: "freedraw",
-    label: "Pen",
-    shortcut: "P",
-    icon: (
-      <svg width={sz} height={sz} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 21c1.5-3.5 5-8 9-10s7 1 5 4-6 5-9 3" />
-      </svg>
-    ),
-  },
-  {
-    id: "eraser",
-    label: "Eraser",
-    shortcut: "E",
-    icon: (
-      <svg width={sz} height={sz} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M19 20H7.5l-4.21-4.3a1 1 0 010-1.41L15 2.7a1 1 0 011.41 0L21.7 8a1 1 0 010 1.41L11 20" />
-        <line x1="18" y1="13" x2="11" y2="6" />
-      </svg>
-    ),
-  },
-];
-
-export default function IslandToolbar({ tool, onToolChange }: IslandToolbarProps) {
-  return (
-    <div className="pointer-events-auto flex items-center gap-0.5 rounded-xl bg-white p-1 shadow-lg ring-1 ring-black/[.06] dark:bg-zinc-800 dark:ring-white/10">
-      {tools.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            title={`${t.label} — ${t.shortcut}`}
-            aria-label={t.label}
-            aria-pressed={tool === t.id}
-            onClick={() => onToolChange(t.id)}
-            className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
-              tool === t.id
-                ? "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300"
-                : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-700"
-            }`}
-          >
-            {t.icon}
-          </button>
-        ),
-      )}
+  return <div className="drawing-tools" ref={root}>
+    {optionsOpen ? <div className="ink-options" id="ink-options"><span className="eyebrow">INK COLOR</span><div className="color-options">{COLORS.map(item=><button key={item.name} className={`color-option ${style.strokeColor===item.color ? "selected" : ""}`} aria-label={`${item.name} ink`} aria-pressed={style.strokeColor===item.color} title={`${item.name} ink`} onClick={()=>onStyleChange({strokeColor:item.color})}><span style={{backgroundColor:item.color}}/>{style.strokeColor===item.color ? <Icon name="check" size={12} style={{color:item.name==="White"||item.name==="Yellow" ? "#1e1e1e" : "#ffffff"}}/> : null}</button>)}</div><div className="width-options"><span>Stroke width</span>{[1,2,4].map(width=><button className={style.strokeWidth===width ? "selected" : ""} key={width} aria-label={`Stroke width ${width}`} aria-pressed={style.strokeWidth===width} onClick={()=>onStyleChange({strokeWidth:width})}><span style={{height:width}}/></button>)}</div></div> : null}
+    <div className="toolbar-row" aria-label="Drawing tools">
+      <button className={`tool-button ${tool==="freedraw" ? "selected" : ""}`} onClick={()=>onToolChange("freedraw")} aria-label="Pen" aria-pressed={tool==="freedraw"} title="Pen (P)"><Icon name="pen" size={21}/><span>Pen</span></button>
+      <button className={`tool-button ${tool==="eraser" ? "selected" : ""}`} onClick={()=>onToolChange("eraser")} aria-label="Eraser" aria-pressed={tool==="eraser"} title="Eraser (E)"><Icon name="eraser" size={21}/></button>
+      <span className="tool-divider"/>
+      <button className="ink-options-toggle" onClick={()=>setOptionsOpen(open=>!open)} aria-expanded={optionsOpen} aria-controls="ink-options" aria-label="Ink options" title="Ink color and stroke width"><span className="current-ink" style={{backgroundColor:style.strokeColor}}/><Icon name="down" size={13}/></button>
+      <span className="tool-divider"/>
+      <button className="tool-button" onClick={onUndo} disabled={!canUndo} aria-label="Undo" title="Undo (⌘Z)"><Icon name="undo" size={19}/></button>
+      <button className="tool-button" onClick={onRedo} disabled={!canRedo} aria-label="Redo" title="Redo (⇧⌘Z)"><Icon name="redo" size={19}/></button>
     </div>
-  );
+  </div>;
 }

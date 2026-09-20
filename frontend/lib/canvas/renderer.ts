@@ -26,7 +26,7 @@ export function renderScene(
   ctx.clearRect(0, 0, width, height);
 
   // background
-  ctx.fillStyle = dark ? "#121212" : "#f5f5f5";
+  ctx.fillStyle = dark ? "oklch(20% 0.009 155)" : "oklch(98.5% 0.007 100)";
   ctx.fillRect(0, 0, width, height);
 
   // dot grid (screen space – dots stay a constant size)
@@ -65,7 +65,7 @@ function drawGrid(
   const gap = GRID_SIZE * cam.zoom;
   if (gap < 8) return; // too dense
 
-  ctx.fillStyle = dark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.07)";
+  ctx.fillStyle = dark ? "oklch(65% 0.015 155 / 0.19)" : "oklch(55% 0.025 155 / 0.17)";
   const r = Math.max(0.5, Math.min(1.4, cam.zoom * 0.7));
 
   const sx = Math.floor(cam.x / GRID_SIZE) * GRID_SIZE;

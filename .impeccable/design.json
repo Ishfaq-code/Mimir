@@ -1,0 +1,363 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-20T00:32:08.386Z",
+  "title": "Design System: Mimir",
+  "extensions": {
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "paper",
+        "tonalRamp": [
+          "oklch(15% 0.007 100)",
+          "oklch(26% 0.007 100)",
+          "oklch(38% 0.007 100)",
+          "oklch(49% 0.007 100)",
+          "oklch(61% 0.007 100)",
+          "oklch(72% 0.007 100)",
+          "oklch(84% 0.007 100)",
+          "oklch(95% 0.007 100)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "surface",
+        "tonalRamp": [
+          "oklch(15% 0.003 100)",
+          "oklch(26% 0.003 100)",
+          "oklch(38% 0.003 100)",
+          "oklch(49% 0.003 100)",
+          "oklch(61% 0.003 100)",
+          "oklch(72% 0.003 100)",
+          "oklch(84% 0.003 100)",
+          "oklch(95% 0.003 100)"
+        ]
+      },
+      "surface-soft": {
+        "role": "neutral",
+        "displayName": "surface soft",
+        "tonalRamp": [
+          "oklch(15% 0.009 120)",
+          "oklch(26% 0.009 120)",
+          "oklch(38% 0.009 120)",
+          "oklch(49% 0.009 120)",
+          "oklch(61% 0.009 120)",
+          "oklch(72% 0.009 120)",
+          "oklch(84% 0.009 120)",
+          "oklch(95% 0.009 120)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "ink",
+        "tonalRamp": [
+          "oklch(15% 0.01 155)",
+          "oklch(26% 0.02 155)",
+          "oklch(38% 0.02 155)",
+          "oklch(49% 0.02 155)",
+          "oklch(61% 0.02 155)",
+          "oklch(72% 0.02 155)",
+          "oklch(84% 0.02 155)",
+          "oklch(95% 0.01 155)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "muted",
+        "tonalRamp": [
+          "oklch(15% 0.01 155)",
+          "oklch(26% 0.015 155)",
+          "oklch(38% 0.015 155)",
+          "oklch(49% 0.015 155)",
+          "oklch(61% 0.015 155)",
+          "oklch(72% 0.015 155)",
+          "oklch(84% 0.015 155)",
+          "oklch(95% 0.01 155)"
+        ]
+      },
+      "faint": {
+        "role": "neutral",
+        "displayName": "faint",
+        "tonalRamp": [
+          "oklch(15% 0.01 155)",
+          "oklch(26% 0.015 155)",
+          "oklch(38% 0.015 155)",
+          "oklch(49% 0.015 155)",
+          "oklch(61% 0.015 155)",
+          "oklch(72% 0.015 155)",
+          "oklch(84% 0.015 155)",
+          "oklch(95% 0.01 155)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "line",
+        "tonalRamp": [
+          "oklch(15% 0.009 130)",
+          "oklch(26% 0.009 130)",
+          "oklch(38% 0.009 130)",
+          "oklch(49% 0.009 130)",
+          "oklch(61% 0.009 130)",
+          "oklch(72% 0.009 130)",
+          "oklch(84% 0.009 130)",
+          "oklch(95% 0.009 130)"
+        ]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "accent",
+        "tonalRamp": [
+          "oklch(15% 0.01 159)",
+          "oklch(26% 0.079 159)",
+          "oklch(38% 0.079 159)",
+          "oklch(49% 0.079 159)",
+          "oklch(61% 0.079 159)",
+          "oklch(72% 0.079 159)",
+          "oklch(84% 0.079 159)",
+          "oklch(95% 0.01 159)"
+        ]
+      },
+      "accent-hover": {
+        "role": "primary",
+        "displayName": "accent hover",
+        "tonalRamp": [
+          "oklch(15% 0.01 159)",
+          "oklch(26% 0.072 159)",
+          "oklch(38% 0.072 159)",
+          "oklch(49% 0.072 159)",
+          "oklch(61% 0.072 159)",
+          "oklch(72% 0.072 159)",
+          "oklch(84% 0.072 159)",
+          "oklch(95% 0.01 159)"
+        ]
+      },
+      "accent-soft": {
+        "role": "primary",
+        "displayName": "accent soft",
+        "tonalRamp": [
+          "oklch(15% 0.01 155)",
+          "oklch(26% 0.026 155)",
+          "oklch(38% 0.026 155)",
+          "oklch(49% 0.026 155)",
+          "oklch(61% 0.026 155)",
+          "oklch(72% 0.026 155)",
+          "oklch(84% 0.026 155)",
+          "oklch(95% 0.01 155)"
+        ]
+      },
+      "on-accent": {
+        "role": "primary",
+        "displayName": "on accent",
+        "tonalRamp": [
+          "oklch(15% 0.005 155)",
+          "oklch(26% 0.005 155)",
+          "oklch(38% 0.005 155)",
+          "oklch(49% 0.005 155)",
+          "oklch(61% 0.005 155)",
+          "oklch(72% 0.005 155)",
+          "oklch(84% 0.005 155)",
+          "oklch(95% 0.005 155)"
+        ]
+      },
+      "error": {
+        "role": "neutral",
+        "displayName": "error",
+        "tonalRamp": [
+          "oklch(15% 0.01 28)",
+          "oklch(26% 0.15 28)",
+          "oklch(38% 0.15 28)",
+          "oklch(49% 0.15 28)",
+          "oklch(61% 0.15 28)",
+          "oklch(72% 0.15 28)",
+          "oklch(84% 0.15 28)",
+          "oklch(95% 0.01 28)"
+        ]
+      },
+      "paper-dark": {
+        "role": "neutral",
+        "displayName": "paper dark",
+        "tonalRamp": [
+          "oklch(15% 0.009 155)",
+          "oklch(26% 0.009 155)",
+          "oklch(38% 0.009 155)",
+          "oklch(49% 0.009 155)",
+          "oklch(61% 0.009 155)",
+          "oklch(72% 0.009 155)",
+          "oklch(84% 0.009 155)",
+          "oklch(95% 0.009 155)"
+        ]
+      },
+      "surface-dark": {
+        "role": "neutral",
+        "displayName": "surface dark",
+        "tonalRamp": [
+          "oklch(15% 0.01 155)",
+          "oklch(26% 0.01 155)",
+          "oklch(38% 0.01 155)",
+          "oklch(49% 0.01 155)",
+          "oklch(61% 0.01 155)",
+          "oklch(72% 0.01 155)",
+          "oklch(84% 0.01 155)",
+          "oklch(95% 0.01 155)"
+        ]
+      },
+      "ink-dark": {
+        "role": "neutral",
+        "displayName": "ink dark",
+        "tonalRamp": [
+          "oklch(15% 0.008 120)",
+          "oklch(26% 0.008 120)",
+          "oklch(38% 0.008 120)",
+          "oklch(49% 0.008 120)",
+          "oklch(61% 0.008 120)",
+          "oklch(72% 0.008 120)",
+          "oklch(84% 0.008 120)",
+          "oklch(95% 0.008 120)"
+        ]
+      },
+      "accent-dark": {
+        "role": "primary",
+        "displayName": "accent dark",
+        "tonalRamp": [
+          "oklch(15% 0.01 155)",
+          "oklch(26% 0.09 155)",
+          "oklch(38% 0.09 155)",
+          "oklch(49% 0.09 155)",
+          "oklch(61% 0.09 155)",
+          "oklch(72% 0.09 155)",
+          "oklch(84% 0.09 155)",
+          "oklch(95% 0.01 155)"
+        ]
+      },
+      "accent-soft-dark": {
+        "role": "primary",
+        "displayName": "accent soft dark",
+        "tonalRamp": [
+          "oklch(15% 0.01 155)",
+          "oklch(26% 0.035 155)",
+          "oklch(38% 0.035 155)",
+          "oklch(49% 0.035 155)",
+          "oklch(61% 0.035 155)",
+          "oklch(72% 0.035 155)",
+          "oklch(84% 0.035 155)",
+          "oklch(95% 0.01 155)"
+        ]
+      }
+    },
+    "shadows": [
+      {
+        "name": "floating-controls",
+        "value": "0 4px 18px oklch(27% 0.02 155 / .07), 0 1px 3px oklch(27% 0.02 155 / .04)",
+        "purpose": "Toolbar and ink popover."
+      }
+    ],
+    "motion": [
+      {
+        "name": "control-transition",
+        "value": "160ms ease-out",
+        "purpose": "State changes; disabled for reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone",
+        "value": "600px"
+      },
+      {
+        "name": "wide-workspace",
+        "value": "1000px"
+      },
+      {
+        "name": "compact-sidebar",
+        "value": "1100px"
+      },
+      {
+        "name": "large-sidebar",
+        "value": "1400px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Voice action",
+      "kind": "button",
+      "refersTo": "button-voice",
+      "description": "Primary live voice action.",
+      "html": "<button class=\"ds-voice\">Talk to Mimir</button>",
+      "css": ".ds-voice{font:500 12px/1.5 Geist,Arial,sans-serif;transition:background-color 160ms ease-out;border:0;padding:13px 16px;border-radius:9px;color:oklch(98.5% 0.005 155);background:oklch(40% 0.079 159);}.ds-voice:hover{background:oklch(34% 0.072 159);}.ds-voice:focus-visible{outline:2px solid oklch(40% 0.079 159);outline-offset:4px;}"
+    },
+    {
+      "name": "Prepared hint",
+      "kind": "button",
+      "refersTo": "button-hint",
+      "description": "Optional support for the selected problem.",
+      "html": "<button class=\"ds-hint\">Give me a hint</button>",
+      "css": ".ds-hint{font:500 12px/1.5 Geist,Arial,sans-serif;transition:background-color 160ms ease-out;padding:12px;border:0;border-radius:8px;background:oklch(93% 0.026 155);color:oklch(40% 0.079 159);}.ds-hint:hover{background:color-mix(in oklch,oklch(93% 0.026 155),oklch(40% 0.079 159) 7%);}.ds-hint:focus-visible{outline:2px solid oklch(40% 0.079 159);outline-offset:4px;}"
+    },
+    {
+      "name": "Selected pen",
+      "kind": "button",
+      "refersTo": "tool-selected",
+      "description": "Pen remains selected after a stroke.",
+      "html": "<button class=\"ds-pen\" aria-pressed=\"true\"><svg width=\"21\" height=\"21\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m4 20 4-1 12-12a2.1 2.1 0 0 0-3-3L5 16l-1 4Z\"/><path d=\"m14 7 3 3M4 20h6\"/></svg>Pen</button>",
+      "css": ".ds-pen{font:500 12px/1.5 Geist,Arial,sans-serif;transition:background-color 160ms ease-out;height:42px;display:flex;align-items:center;gap:8px;padding:0 10px;border:0;border-radius:8px;background:oklch(93% 0.026 155);color:oklch(40% 0.079 159);}.ds-pen:hover{background:oklch(96.5% 0.009 120);}.ds-pen:focus-visible{outline:2px solid oklch(40% 0.079 159);outline-offset:4px;}"
+    },
+    {
+      "name": "Inactive eraser",
+      "kind": "button",
+      "refersTo": "tool-ghost",
+      "description": "Neutral drawing tool.",
+      "html": "<button class=\"ds-eraser\" aria-label=\"Eraser\"><svg width=\"21\" height=\"21\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.65\"><path d=\"m8 20-5-5a2 2 0 0 1 0-3l10-9a2 2 0 0 1 3 0l5 5a2 2 0 0 1 0 3l-9 9H8Z\"/><path d=\"m8 8 9 9M12 20h9\"/></svg></button>",
+      "css": ".ds-eraser{height:42px;width:42px;display:flex;align-items:center;justify-content:center;border:0;border-radius:8px;color:oklch(53% 0.015 155);background:transparent;}.ds-eraser:hover{background:oklch(96.5% 0.009 120);}.ds-eraser:focus-visible{outline:2px solid oklch(40% 0.079 159);outline-offset:4px;}"
+    },
+    {
+      "name": "Topic label",
+      "kind": "chip",
+      "refersTo": "problem-tag",
+      "description": "A quiet descriptor for the current problem.",
+      "html": "<span class=\"ds-tag\">Distributive property</span>",
+      "css": ".ds-tag{font:400 10px Geist,Arial,sans-serif;display:inline-block;padding:5px 9px;border:1px solid oklch(89% 0.009 130);border-radius:5px;color:oklch(53% 0.015 155);}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Room to work",
+    "overview": "A student is at a desk after class, with daylight in the room, an iPad, and a problem they are trying to understand. The default workspace is warm and bright, with a quiet green accent. An explicit dark theme supports a different environment without changing the layout.\n\nThe canvas is the main surface. A compact header establishes the problem; the tutor occupies a separate right column on wide screens and an optional overlay on small screens. This is product UI, not a marketing page. The visual hierarchy gives writing room while making the next useful action easy to find.",
+    "keyCharacteristics": [
+      "Warm paper, green controls, and an unobtrusive dot grid.",
+      "A fixed problem header above an unrestricted writing surface.",
+      "A compact bottom toolbar with comfortable drawing controls.",
+      "A tutor sidebar that separates prepared guidance from live voice."
+    ],
+    "rules": [
+      {
+        "name": "The Ink Rule.",
+        "body": "Keep white available and preserve the student's chosen stroke colors.",
+        "section": "colors"
+      },
+      {
+        "name": "The Working Surface Rule.",
+        "body": "Use display scale only for the current equation and the short tutor introduction. Keep the remaining UI compact.",
+        "section": "typography"
+      },
+      {
+        "name": "The Canvas Rule.",
+        "body": "Elevate the controls, not the handwriting. Never frame completed pen strokes with selection boxes.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep the canvas dominant and the pen active after each stroke.",
+      "Do use the same green action vocabulary throughout the interface.",
+      "Do preserve the voice, recognition, and tutor-annotation integrations.",
+      "Do label prepared guidance separately from live tutor behavior.",
+      "Do check both themes, narrow layouts, and the actual iPad for relevant changes."
+    ],
+    "donts": [
+      "Don't introduce **Selection boxes after every stroke.**",
+      "Don't substitute **Typed math as the primary student input.**",
+      "Don't default to **Unrequested full solutions.** Reveal support when requested.",
+      "Don't prioritize **Teacher dashboards before the core tutor works.**",
+      "Don't add decorative gradients, glass panels, or repeated card grids.",
+      "Don't claim a provider or hardware test passed from frontend-only checks."
+    ]
+  }
+}

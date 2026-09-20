@@ -1,106 +1,50 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import type { PracticeProblem } from "@/lib/problems";
+import Icon, { MimirMark } from "./Icon";
 
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
+function ProblemVisual({ problem }: { problem: PracticeProblem }) {
+  return <figure className="problem-visual">
+    <svg viewBox="0 0 280 164" role="img" aria-label={problem.visualCaption}>
+      {problem.visual === "groups" ? <>
+        {[28, 88].map(y => <g key={y}><rect className="visual-x" x="28" y={y} width="94" height="40" rx="6"/><text x="75" y={y + 26}>x</text>{[0,1,2].map(i => <g key={i}><rect className="visual-unit" x={138 + i * 38} y={y} width="28" height="40" rx="5"/><text className="unit-label" x={152 + i * 38} y={y + 25}>1</text></g>)}</g>)}
+        <path className="visual-line" d="M16 28h-5v100h5"/><text className="visual-caption" x="140" y="151">2 groups of (x + 3)</text>
+      </> : problem.visual === "balance" ? <>
+        <path className="visual-line" d="M140 42v90m-18 10 18-18 18 18M30 57h220M52 57v43m176-43v43M23 100q29 26 58 0m118 0q29 26 58 0"/>
+        <rect className="visual-x" x="19" y="22" width="66" height="30" rx="5"/><text className="unit-label" x="52" y="43">3x + 5</text>
+        <rect className="visual-unit" x="207" y="22" width="42" height="30" rx="5"/><text className="unit-label" x="228" y="43">20</text>
+      </> : <>
+        <path className="visual-line" d="M26 38v-8h228v8"/><text className="visual-caption" x="140" y="22">one whole x</text>
+        {[0,1,2,3].map(i=><rect key={i} className={i===0 ? "visual-x" : "visual-unit"} x={26+i*58} y="57" width="52" height="51" rx="5"/>)}
+        <text className="visual-caption" x="52" y="136">x ÷ 4</text><path className="visual-line" d="M52 114v8"/>
+      </>}
+    </svg>
+    <figcaption>{problem.visualCaption}</figcaption>
+  </figure>;
 }
 
-interface ChatPanelProps {
-  onClose: () => void;
-}
+export default function ChatPanel({ problem, onClose }: { problem: PracticeProblem; onClose: () => void }) {
+  const [hintCount, setHintCount] = useState(0);
+  const [stepCount, setStepCount] = useState(0);
+  const [visualOpen, setVisualOpen] = useState(false);
 
-export default function ChatPanel({ onClose }: ChatPanelProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    { id: "0", role: "assistant", content: "Hey! How can I help with your drawing?" },
-  ]);
-  const [input, setInput] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const send = () => {
-    const text = input.trim();
-    if (!text) return;
-    setMessages((prev) => [...prev, { id: Date.now().toString(), role: "user", content: text }]);
-    setInput("");
-
-    // placeholder echo response
-    setTimeout(() => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `${Date.now()}-a`,
-          role: "assistant",
-          content: "This is a placeholder response. Connect a backend to get real answers.",
-        },
-      ]);
-    }, 500);
-  };
-
-  return (
-    <div className="flex h-full w-80 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-      {/* header */}
-      <div className="flex items-center justify-between px-4 py-3">
-        <h2 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Chat</h2>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-        >
-          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
+  return <>
+    <div className="tutor-heading"><div className="tutor-title"><span className="tutor-mark"><MimirMark /></span><span>Mimir <span className="preview-badge">Problem guide</span></span></div><button className="icon-button" onClick={onClose} aria-label="Close tutor"><Icon name="close" size={18}/></button></div>
+    <div className="tutor-body">
+      <div className="tutor-intro"><span className="eyebrow">A LITTLE GUIDANCE</span><h2>You’ve got this.<br/>Let’s find a way in.</h2><p>Try it on your own. When you need a nudge, I’m right here.</p></div>
+      <div className="tutor-conversation" aria-live="polite" aria-relevant="additions">
+        {hintCount === 0 && stepCount === 0 && !visualOpen ? <div className="first-prompt"><span className="small-dot"/><p>What’s the first thing you notice about this equation?</p></div> : null}
+        {problem.hints.slice(0,hintCount).map((hint,index)=><div className="hint-message" key={hint}><div className="message-label"><Icon name="bulb" size={15}/>HINT {String(index+1).padStart(2,"0")}</div><p>{hint}</p></div>)}
+        {visualOpen ? <div className="visual-message"><div className="message-label"><Icon name="visual" size={15}/>ANOTHER WAY TO SEE IT</div><ProblemVisual problem={problem}/><button className="text-button" onClick={()=>setVisualOpen(false)}>Hide visual</button></div> : null}
+        {stepCount > 0 ? <div className="worked-example"><div className="message-label"><Icon name="steps" size={15}/>WORKED EXAMPLE</div><ol>{problem.steps.slice(0,stepCount).map((step,index)=><li key={step.equation}><span className="step-number">{index+1}</span><div><p className="step-equation">{step.equation}</p><p>{step.explanation}</p></div></li>)}</ol>{stepCount < problem.steps.length ? <button className="text-button" onClick={()=>setStepCount(count=>count+1)}>Show the next step <Icon name="chevron" size={14}/></button> : <p className="example-complete"><Icon name="check" size={16}/>Now try the steps in your own handwriting.</p>}</div> : null}
       </div>
-
-      {/* messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-2">
-        <div className="flex flex-col gap-3">
-          {messages.map((m) => (
-            <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div
-                className={`max-w-[85%] rounded-2xl px-3 py-2 text-[13px] leading-relaxed ${
-                  m.role === "user"
-                    ? "bg-blue-500 text-white"
-                    : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-                }`}
-              >
-                {m.content}
-              </div>
-            </div>
-          ))}
-          <div ref={bottomRef} />
-        </div>
-      </div>
-
-      {/* input */}
-      <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
-        <div className="flex gap-2">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
-            }}
-            placeholder="Type a message..."
-            className="flex-1 rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-sm outline-none placeholder:text-zinc-400 focus:border-blue-400 dark:border-zinc-700 dark:text-zinc-100"
-          />
-          <button
-            type="button"
-            onClick={send}
-            className="rounded-lg bg-blue-500 px-3 py-2 text-white transition-colors hover:bg-blue-600"
-          >
-            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
-            </svg>
-          </button>
-        </div>
+      <div className="help-actions"><span className="guide-label">PREPARED HINTS</span>
+        <button className="hint-button" disabled={hintCount === problem.hints.length} onClick={()=>setHintCount(count=>Math.min(count+1,problem.hints.length))}><Icon name="bulb" size={18}/><span>{hintCount === 0 ? "Give me a hint" : hintCount < problem.hints.length ? "Give me another hint" : "All hints revealed"}</span><Icon name="chevron" size={16}/></button>
+        <button className="help-action" disabled={visualOpen} onClick={()=>setVisualOpen(true)}><Icon name="visual" size={18}/><span>Help me visualize</span><Icon name="chevron" size={15}/></button>
+        <button className="help-action" disabled={stepCount > 0} onClick={()=>setStepCount(1)}><Icon name="steps" size={18}/><span>Walk me through it</span><Icon name="chevron" size={15}/></button>
       </div>
     </div>
-  );
+
+  </>;
 }

@@ -1,19 +1,9 @@
 import type { CanvasState, RecognizedEquation, TutorAnnotation } from "./types";
 
-// Seeded recognized equation for the vertical slice (spec.md section 20):
-// the student "has written" x² + 4x = 12. Real recognition replaces this
-// in a later milestone.
-const SEED_EQUATIONS: RecognizedEquation[] = [
-  {
-    id: "equation_1",
-    latex: "x^2 + 4x = 12",
-    boundingBox: { x: 120, y: 180, width: 310, height: 70 },
-    confidence: 1,
-  },
-];
-
-let revision = 1;
-const equations = SEED_EQUATIONS;
+// The workspace supplies the selected problem after mounting. No synthetic
+// student handwriting is rendered or reported to the tutor.
+let revision = 0;
+let equations: RecognizedEquation[] = [];
 let tutorAnnotations: TutorAnnotation[] = [];
 
 const listeners = new Set<() => void>();
@@ -48,6 +38,22 @@ export function addTutorAnnotation(annotation: TutorAnnotation): void {
 
 export function clearTutorAnnotations(): void {
   tutorAnnotations = [];
+  revision += 1;
+  emit();
+}
+
+/** Current practice problem is known context, not recognized student ink. */
+export function setPracticeProblem(latex: string): void {
+  equations = [{ id: "practice-problem", latex }];
+  tutorAnnotations = [];
+  revision += 1;
+  emit();
+}
+
+/** Publish only current recognition results to the voice tutor's canvas view. */
+export function setRecognizedWork(equation: RecognizedEquation | null): void {
+  equations = equations.filter(item => item.id !== "student-work");
+  if (equation) equations = [...equations, equation];
   revision += 1;
   emit();
 }

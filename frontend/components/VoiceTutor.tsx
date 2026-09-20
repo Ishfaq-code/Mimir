@@ -11,6 +11,7 @@ import {
 import type { RemoteParticipant } from "livekit-client";
 import { registerCanvasRpcs } from "@/lib/livekit/rpc";
 import { tutorCanvas } from "@/lib/tutor/tutorCanvas";
+import Icon from "./Icon";
 
 type VoiceStatus =
   | "disconnected"
@@ -21,7 +22,7 @@ type VoiceStatus =
   | "error";
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
-  disconnected: "Tutor offline",
+  disconnected: "Ready when you are",
   connecting: "Connecting…",
   listening: "Listening",
   thinking: "Thinking…",
@@ -29,19 +30,11 @@ const STATUS_LABEL: Record<VoiceStatus, string> = {
   error: "Connection failed",
 };
 
-const STATUS_DOT: Record<VoiceStatus, string> = {
-  disconnected: "bg-zinc-400",
-  connecting: "bg-amber-400 animate-pulse",
-  listening: "bg-emerald-500",
-  thinking: "bg-amber-400 animate-pulse",
-  speaking: "bg-blue-500 animate-pulse",
-  error: "bg-red-500",
-};
-
 /** Voice bar: connects the browser to the LiveKit room, publishes the mic,
  * plays the tutor's audio, and registers the canvas RPC methods. */
 export default function VoiceTutor() {
   const roomRef = useRef<Room | null>(null);
+  const connectAttemptRef = useRef(0);
   const audioElsRef = useRef<HTMLMediaElement[]>([]);
   const [status, setStatus] = useState<VoiceStatus>("disconnected");
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +42,7 @@ export default function VoiceTutor() {
   const connected = status !== "disconnected" && status !== "error";
 
   const disconnect = useCallback(async () => {
+    connectAttemptRef.current += 1;
     for (const el of audioElsRef.current) el.remove();
     audioElsRef.current = [];
     const room = roomRef.current;
@@ -75,14 +69,16 @@ export default function VoiceTutor() {
   }
 
   async function connect() {
+    const attempt = ++connectAttemptRef.current;
     setStatus("connecting");
     setError(null);
     try {
-      const tokenUrl = process.env.NEXT_PUBLIC_TOKEN_URL ?? "http://localhost:8000";
+      const tokenUrl = process.env.NEXT_PUBLIC_TOKEN_URL ?? `${window.location.protocol}//${window.location.hostname}:8000`;
       const res = await fetch(`${tokenUrl}/token`);
-      if (!res.ok) throw new Error(`token request failed (HTTP ${res.status})`);
+      if (!res.ok) throw new Error("Voice is unavailable right now. Please try again.");
       const { token, url } = (await res.json()) as { token: string; url: string };
 
+      if (attempt !== connectAttemptRef.current) return;
       const room = new Room();
       roomRef.current = room;
 
@@ -105,6 +101,7 @@ export default function VoiceTutor() {
       });
 
       await room.connect(url, token);
+      if (attempt !== connectAttemptRef.current) { await room.disconnect(); return; }
 
       // the tutor draws via these RPC methods — register before it can call
       registerCanvasRpcs(room.localParticipant, tutorCanvas);
@@ -115,33 +112,25 @@ export default function VoiceTutor() {
 
       await room.localParticipant.setMicrophoneEnabled(true);
     } catch (e) {
+      if (attempt !== connectAttemptRef.current) return;
       const msg = e instanceof Error ? e.message : String(e);
       await disconnect();
       setError(
         msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("notallowed")
           ? "Microphone access denied"
-          : msg,
+          : "Voice is unavailable right now. Please try again.",
       );
       setStatus("error");
     }
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-lg ring-1 ring-black/[.06] dark:bg-zinc-800 dark:ring-white/10">
-      <span className={`h-2 w-2 rounded-full ${STATUS_DOT[status]}`} />
-      <span
-        className="text-xs font-medium text-zinc-600 dark:text-zinc-300"
-        title={error ?? undefined}
-      >
-        {status === "error" && error ? error : STATUS_LABEL[status]}
-      </span>
-      <button
-        type="button"
-        onClick={() => (connected ? void disconnect() : void connect())}
-        className="rounded-lg bg-violet-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-violet-500"
-      >
-        {connected ? "Disconnect" : "Talk to tutor"}
+    <div className={`voice-control voice-${status}`}>
+      <div className="voice-status" role="status"><span className="status-dot"/>{STATUS_LABEL[status]}</div>
+      <button type="button" className="voice-button" onClick={() => (connected ? void disconnect() : void connect())} disabled={status === "connecting"}>
+        <Icon name={connected ? "close" : "mic"} size={20}/><span>{status === "connecting" ? "Connecting…" : connected ? "End conversation" : "Talk to Mimir"}</span><span className="voice-wave" aria-hidden="true"><i/><i/><i/><i/></span>
       </button>
+      {error && status === "error" ? <p className="voice-error" role="alert">{error}</p> : null}
     </div>
   );
 }

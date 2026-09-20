@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Mimir — Infinite Canvas",
-  description: "Draw, sketch, and diagram on an infinite canvas.",
+  title: "Mimir | Your space to think",
+  description: "Work through math in your own handwriting, with a tutor beside you.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
