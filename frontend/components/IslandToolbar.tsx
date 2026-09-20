@@ -20,9 +20,11 @@ interface IslandToolbarProps {
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+  hasSelectedLatex: boolean;
+  onGraph: () => void;
 }
 
-export default function IslandToolbar({tool,onToolChange,style,onStyleChange,onUndo,onRedo,canUndo,canRedo}: IslandToolbarProps) {
+export default function IslandToolbar({tool,onToolChange,style,onStyleChange,onUndo,onRedo,canUndo,canRedo,hasSelectedLatex,onGraph}: IslandToolbarProps) {
   const [optionsOpen,setOptionsOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   useEffect(()=>{
@@ -42,6 +44,8 @@ export default function IslandToolbar({tool,onToolChange,style,onStyleChange,onU
       <button className={`tool-button ${tool==="freedraw" ? "selected" : ""}`} onClick={()=>onToolChange("freedraw")} aria-label="Pen" aria-pressed={tool==="freedraw"} title="Pen (P)"><Icon name="pen" size={21}/><span>Pen</span></button>
       <button className={`tool-button ${tool==="eraser" ? "selected" : ""}`} onClick={()=>onToolChange("eraser")} aria-label="Eraser" aria-pressed={tool==="eraser"} title="Eraser (E)"><Icon name="eraser" size={21}/></button>
       <button className={`tool-button ${tool==="text" ? "selected" : ""}`} onClick={()=>onToolChange("text")} aria-label="Text" aria-pressed={tool==="text"} title="Text (T)"><Icon name="text" size={20}/></button>
+      <span className="tool-divider"/>
+      <button className="tool-button" onClick={onGraph} disabled={!hasSelectedLatex} aria-label="Graph equation" title="Graph selected equation"><Icon name="graph" size={20}/></button>
       <span className="tool-divider"/>
       <button className="ink-options-toggle" onClick={()=>setOptionsOpen(open=>!open)} aria-expanded={optionsOpen} aria-controls="ink-options" aria-label="Ink options" title="Ink color and stroke width"><span className="current-ink" style={{backgroundColor:style.strokeColor}}/><Icon name="down" size={13}/></button>
       <span className="tool-divider"/>
