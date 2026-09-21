@@ -193,7 +193,7 @@ button { transition: background-color 160ms ease-out, color 160ms ease-out, opac
 .graph-overlay-legend-item > span:last-child { overflow:hidden; text-overflow:ellipsis; }
 .graph-overlay-legend-dot { width:7px; height:7px; flex:none; border-radius:50%; }
 .graph-canvas { display:block; width:100%; background:transparent; }
-.graph-slider-bar { display:flex; flex-wrap:wrap; gap:6px 14px; padding:8px 14px; border-top:1px solid var(--line); background:var(--surface); flex:none; }
+.graph-slider-bar { display:flex; flex-wrap:wrap; gap:6px 14px; padding:10px 14px 14px; border-top:1px solid var(--line); background:var(--surface); flex:none; }
 .graph-slider { display:flex; align-items:center; gap:6px; font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
 .graph-slider span { min-width:48px; }
 .graph-slider input[type="range"] { width:80px; height:3px; accent-color:var(--accent); cursor:pointer; }
