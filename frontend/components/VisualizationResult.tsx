@@ -5,7 +5,7 @@ import Icon from "./Icon";
 
 export interface VisualizationObject {
   id: string;
-  type: "circle" | "rect" | "line" | "arrow" | "path" | "text";
+  type: "circle" | "rect" | "truck" | "baseball" | "line" | "arrow" | "path" | "text";
   x?: number;
   y?: number;
   x2?: number;
@@ -52,7 +52,11 @@ function objectBounds(object: VisualizationObject): Bounds {
     const radius = object.radius ?? 12;
     return { x: x - radius, y: y - radius, width: radius * 2, height: radius * 2 };
   }
-  if (object.type === "rect") return { x, y, width: object.width ?? 40, height: object.height ?? 40 };
+  if (object.type === "rect" || object.type === "truck") return { x, y, width: object.width ?? 40, height: object.height ?? 40 };
+  if (object.type === "baseball") {
+    const radius = object.radius ?? 15;
+    return { x: x - radius, y: y - radius, width: radius * 2, height: radius * 2 };
+  }
   if (object.type === "line" || object.type === "arrow") {
     const x2 = object.x2 ?? x;
     const y2 = object.y2 ?? y;
@@ -124,6 +128,33 @@ function renderObject(object: VisualizationObject, labels: Record<string, LabelL
 
   if (object.type === "circle") return <g key={key} {...scene}><circle cx={x} cy={y} r={object.radius ?? 12} fill={color}/>{label}</g>;
   if (object.type === "rect") return <g key={key} {...scene}><rect x={x} y={y} width={object.width ?? 40} height={object.height ?? 40} fill={color}/>{label}</g>;
+  if (object.type === "truck") {
+    const width = object.width ?? 84;
+    const height = object.height ?? 48;
+    const scaleX = width / 84;
+    const scaleY = height / 48;
+    return <g key={key} {...scene}>
+      <g transform={`translate(${x} ${y}) scale(${scaleX} ${scaleY})`}>
+        <path d="M4 13h49V5h16l11 12v19H4Z" fill={color} stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round"/>
+        <path d="M53 8h14l8 10H53Z" fill="var(--surface)" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round"/>
+        <path d="M57 10v7h14l-6-7Z" fill="var(--accent-soft)" stroke="var(--ink)" strokeWidth="1.5"/>
+        <circle cx="20" cy="39" r="7" fill="var(--ink)"/><circle cx="20" cy="39" r="3" fill="var(--surface)"/>
+        <circle cx="68" cy="39" r="7" fill="var(--ink)"/><circle cx="68" cy="39" r="3" fill="var(--surface)"/>
+      </g>
+      {label}
+    </g>;
+  }
+  if (object.type === "baseball") {
+    const radius = object.radius ?? 15;
+    return <g key={key} {...scene}>
+      <g transform={`translate(${x} ${y})`}>
+        <circle r={radius} fill={color} stroke="var(--ink)" strokeWidth="1.5"/>
+        <path d="M-9-12c5 3 7 7 6 12s-4 9-9 12M9-12c-5 3-7 7-6 12s4 9 9 12" fill="none" stroke="#d94841" strokeWidth="1.5" strokeLinecap="round"/>
+        <path d="m-10-8 3 2m-5 3 3 2m-4 3 3 2m20-12-3 2m5 3-3 2m4 3-3 2" fill="none" stroke="#d94841" strokeWidth="1.3" strokeLinecap="round"/>
+      </g>
+      {label}
+    </g>;
+  }
   if (object.type === "line" || object.type === "arrow") {
     const line = <line x1={x} y1={y} x2={object.x2 ?? x} y2={object.y2 ?? y} stroke={color} strokeWidth="4" markerEnd={object.type === "arrow" ? `url(#${markerId})` : undefined}/>;
     return <g key={key} {...scene}>{line}{label}</g>;
