@@ -7,7 +7,9 @@ class WritingPolicy(unittest.TestCase):
     def test_explicit_requests_to_the_tutor(self):
         for text in ['Write that down.', 'Please draw a blank for me', 'Can you write the next step?',
                      'Could you please fill in that blank?', 'I want you to write the answer',
-                     'Mimir, write it on the canvas', 'Can you just record my answer?']:
+                     'Mimir, write it on the canvas', 'Can you just record my answer?',
+                     'Could you go ahead and write that?', 'Okay, please write the next step.',
+                     'Go ahead and write it down', 'Can you actually write it for me?']:
             with self.subTest(text=text):
                 self.assertTrue(requests_writing(text))
 

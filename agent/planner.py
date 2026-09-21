@@ -7,8 +7,8 @@ from time import perf_counter
 from typing import Literal
 from pydantic import BaseModel, Field
 import config
-from math_check import equivalent, valid_scaffold
-from writing_policy import requests_writing
+from math_check import equivalent, valid_scaffold, polynomial, related_calculation
+from writing_policy import requests_writing, ai_writing, declines_writing
 
 logger = logging.getLogger('mimir-tutor')
 
@@ -29,7 +29,7 @@ class TeachingPlan(BaseModel):
     problem_region_ids: list[str] = Field(description='Current IDs for the original question AND its related student work below. Include EVERY highlight_region_id. This is the whole working column, not only the printed question.')
     highlight_region_ids: list[str] = Field(description='ALL regions of the complete subexpression being discussed: both operands AND the operator, never just the operator. Use [] only for no visual target.')
     highlight_label: str
-    focus_expression: str | None = Field(default=None, description='Exact canonical numeric subexpression the student is asked to evaluate, e.g. 2+2 or 3*2; null for algebra, ambiguous work or non-calculation questions. Must be a subtree of the original problem.')
+    focus_expression: str | None = Field(default=None, description='Exact canonical numeric subexpression the student is asked to evaluate, e.g. 2+2 or 3*2; null for algebra, ambiguous work or non-calculation questions. Must belong to the original problem or its latest checked full line.')
     speech: str = Field(max_length=700)
     checks: list[Check]
     scaffold: Scaffold | None
@@ -75,7 +75,12 @@ a scaffold, say something like "Write the total in the blank." Do not read its t
 Ask one small question, then wait. Be conversational, specific, and brief (usually <=35 words).
 For 2+3*2, guide multiplication first; don't evaluate left to right. For 2(x+3), distribute to BOTH terms.
 For a wrong answer, gently point to the specific error; don't praise it or advance to a new step.
-Writing is student-led by default. After a correct answer, guide the student to write their
+WRITING MODE: preferences.aiWrites=true means AI WRITES. In that mode you handle handwriting
+one step at a time while the student answers aloud or in chat. Include one equivalent scaffold
+for a board hint; record correct answers and ask the next small question. Never tell the student
+to write, dump all future steps, or advance after a wrong answer. Correct answer recording takes
+priority over a proposed next blank. A spoken request not to write overrides this mode for the turn.
+Otherwise writing is student-led. After a correct answer, guide the student to write their
 own next line. Set scaffold=null unless the CURRENT student message explicitly asks YOU to
 write/draw a step or blank. A spoken answer, hint request, "show me how" or unfinished work
 is not permission to write. Never automatically fill a tutor blank when the student answers.
@@ -83,6 +88,11 @@ When explicitly asked to write, offer ONE next equation with {{blank}} for the s
 If the final answer is already correct, no scaffold; briefly confirm completion. NEVER invent
 a new practice question unless the student explicitly requests another question.
 If a scaffold is already on the board and unfinished, stay with it; do not duplicate or skip it.
+Keep the FULL expression on every written line, preserving parentheses and unchanged terms.
+For 5*(2+3), ask about 2+3 using scaffold 5*({{blank}}), answer 5. After the
+student says 5, record 5*(5); then ask about multiplication. After 25, record 5*(5)=25.
+Never detach this into 2+3={{blank}} or drop the outer 5 or parentheses. Only simplify the
+operation the student has just answered. Follow existing checked lines from top to bottom.
 If asking the student to fill a NEW blank, include its scaffold object in this response.
 Never just describe a new blank in speech while scaffold is null.
 Students may answer aloud; use the prior question to interpret short answers like 'six'.
@@ -107,7 +117,7 @@ For a spoken correct '6' to 3*2, check left='3*2',right='6',equal=true.
 For algebra steps compare BOTH equations: '2*(x+3)=14' vs '2*x+3=14' equal=false.
 Only one variable and basic +,-,*,/,^ are independently checkable. Unsupported math: explain
 conceptually or ask to narrow the step; don't certify an answer or generate unsupported scaffolds.
-scaffold is null unless the student explicitly requested AI writing in this message.
+scaffold is null unless AI WRITES mode is selected or the student explicitly requested AI writing.
 scaffold.template uses exactly one {{blank}}, plain math and explicit *; answer fills ONLY the blank.
 For template '2+6={{blank}}', answer is '8', never '2+6=8'.
 Filled template MUST be equivalent to the ORIGINAL problem field. Do not
@@ -169,10 +179,26 @@ def validate_plan(plan: TeachingPlan, view: dict) -> None:
     if plan.status in ('clarify', 'conversation', 'read') and (plan.scaffold or plan.highlight_region_ids):
         raise ValueError('Ambiguous turn cannot annotate')
 
-def finalize_plan(plan: TeachingPlan, view: dict, *, allow_writing: bool = True) -> TeachingPlan:
-    """Shared deterministic checks for both checked OpenAI and native Gemini turns."""
+def normalize_board_hint(plan: TeachingPlan) -> TeachingPlan:
+    # Numeric juxtaposition such as 5(2+3) is unambiguous multiplication in this
+    # bounded math domain; preserve its brackets while canonicalizing the token.
+    plan.problem = re.sub(r'(?<=\d)\s*(?=\()', '*', plan.problem)
     if plan.problem.strip().endswith('='):
         plan.problem = plan.problem.strip()[:-1].strip()
+    # Native models sometimes call a grounded arithmetic question conversation.
+    # Correct that routing only with a checked focus AND explicit board regions.
+    if plan.status == 'conversation' and plan.problem_region_ids and plan.focus_expression and not plan.student_answer and not plan.checks:
+        try:
+            if len(polynomial(plan.focus_expression)) == 1 and related_calculation(plan.problem, plan.focus_expression):
+                plan.status = 'hint'
+        except (ValueError, SyntaxError, ArithmeticError):
+            pass
+    return plan
+
+
+def finalize_plan(plan: TeachingPlan, view: dict, *, allow_writing: bool = True, ai_writes: bool = False) -> TeachingPlan:
+    """Shared deterministic checks for both checked OpenAI and native Gemini turns."""
+    plan = normalize_board_hint(plan)
     proposed_scaffold = plan.scaffold if allow_writing else None
     omitted_scaffold = plan.scaffold is not None and not allow_writing
     plan.scaffold = None
@@ -180,9 +206,9 @@ def finalize_plan(plan: TeachingPlan, view: dict, *, allow_writing: bool = True)
     if finished_problem(plan):
         plan.speech = "Yes, that's right. You've finished this problem."
     else:
-        plan.scaffold = proposed_scaffold
+        plan.scaffold = proposed_scaffold if not (ai_writes and plan.status == 'correct') else None
         validate_plan(plan, view)
-    if plan.scaffold:
+    if plan.scaffold and not ai_writes:
         plan.speech = ("That's right. " if plan.status == 'correct' else "Try this next step. ") + "Write the missing value in the blank below."
     else:
         plan.speech = plan.speech.replace('{{blank}}', 'the blank')
@@ -230,7 +256,8 @@ class Planner:
                     usage.output_tokens if usage else None,
                     usage.output_tokens_details.reasoning_tokens if usage else None)
         if not response.output_parsed: raise ValueError('No readable teaching plan')
-        return finalize_plan(response.output_parsed, view, allow_writing=requests_writing(text))
+        ai_writes = ai_writing(state.get('preferences')) and not declines_writing(text)
+        return finalize_plan(response.output_parsed, view, allow_writing=ai_writes or requests_writing(text), ai_writes=ai_writes)
 
     async def close(self):
         await self.client.close()

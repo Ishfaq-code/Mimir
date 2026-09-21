@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 export interface LearningPreferences {
+  aiWrites: boolean;
   captions: boolean;
   oneStep: boolean;
   shortReplies: boolean;
@@ -11,6 +12,7 @@ export interface LearningPreferences {
   slowerVoice: boolean;
 }
 export const DEFAULT_PREFERENCES: LearningPreferences = {
+  aiWrites: false,
   captions: true, oneStep: true, shortReplies: true, largeText: false,
   roomyText: false, calm: false, highlights: true, slowerVoice: false,
 };

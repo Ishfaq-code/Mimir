@@ -41,7 +41,22 @@ button { transition: background-color 160ms ease-out, color 160ms ease-out, opac
 .brand-symbol { display:flex; align-items:center; justify-content:center; color:var(--accent); }
 .brand-symbol svg { width:31px; height:31px; }
 .brand-period { color:var(--accent); margin-left:-9px; }
-.header-actions { margin-left:auto; display:flex; align-items:center; gap:14px; }
+.header-actions { display:flex; align-items:center; gap:14px; }
+.writing-mode { margin-left:auto; display:flex; flex:none; gap:2px; padding:3px; border:1px solid var(--line); border-radius:11px; background:var(--surface-soft); }
+.writing-mode label { position:relative; cursor:pointer; }
+.writing-mode input { position:absolute; width:1px; height:1px; opacity:0; }
+.writing-mode span { display:flex; align-items:center; justify-content:center; gap:7px; min-height:40px; padding:0 12px; border-radius:7px; color:var(--muted); font-size:12px; font-weight:550; white-space:nowrap; transition:color 160ms ease-out, background-color 160ms ease-out; }
+.writing-mode label:hover span { color:var(--ink); }
+.writing-mode input:checked + span { background:var(--accent-soft); color:var(--accent); }
+.writing-mode input:focus-visible + span { outline:2px solid var(--accent); outline-offset:2px; }
+@media (max-width:600px) {
+  .writing-mode span { padding:0 9px; font-size:11px; }
+  .writing-mode svg { display:none; }
+}
+@media (max-width:380px) {
+  .app-header .wordmark { font-size:20px; gap:5px; }
+  .app-header .brand-symbol { display:none; }
+}
 .icon-button { width:36px; height:36px; display:inline-flex; align-items:center; justify-content:center; background:transparent; border:0; border-radius:8px; color:var(--muted); flex:none; }
 .icon-button:hover:not(:disabled) { background:var(--surface-soft); color:var(--ink); }
 .workspace-layout { height:calc(100% - 64px); position:relative; display:flex; }
@@ -93,7 +108,7 @@ button { transition: background-color 160ms ease-out, color 160ms ease-out, opac
 @keyframes latex-bounce { from { transform:scale(.82); } to { transform:none; } }
 @keyframes latex-fade { from { opacity:0; } to { opacity:1; } }
 .recognized-math .katex-display { margin:0; }
-.recognized-math-selectable { pointer-events:auto; cursor:pointer; border-radius:6px; }
+.recognized-math-selectable { pointer-events:auto; cursor:pointer; border-radius:6px; touch-action:none; }
 .recognized-math-selectable:hover:not(.recognized-math-selected) { background:oklch(50% 0.05 155 / .08); }
 .recognized-math-selected { outline:2px solid #4f8ff7; outline-offset:3px; border-radius:4px; cursor:grab; user-select:none; -webkit-user-select:none; }
 .recognized-math-selected:active { cursor:grabbing; }

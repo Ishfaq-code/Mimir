@@ -54,6 +54,9 @@ try {
   assert.equal(board.highlightRegion(args).success,false);
   assert.equal(support.parsePreferences({calm:'yes',captions:false,largeText:true}).calm,false);
   assert.equal(support.getPreferences().captions,true);
+  assert.equal(support.getPreferences().aiWrites,false,'Student writing is the default');
+  assert.equal(support.parsePreferences({aiWrites:'true'}).aiWrites,false,'Malformed stored modes cannot enable automatic ink');
+  assert.equal(support.parsePreferences({aiWrites:true}).aiWrites,true);
   const stroke=(id,x,y,width,height)=>({id,x,y,width,height,type:'freedraw',isDeleted:false,points:[{x:0,y:0,t:0},{x:width,y:height,t:1}]});
   assert.deepEqual(capture.snapToInk({x:20,y:30,width:120,height:60},[stroke('a',30,40,20,30),stroke('b',90,42,22,32),stroke('outside',200,40,20,30)]),{x:30,y:40,width:82,height:34});
   assert.equal(capture.inkRegions([stroke('one',30,40,20,0),stroke('two',50,40,0,30),stroke('three',90,40,20,30)]).length,2);
@@ -90,9 +93,9 @@ try {
   const belowOccupied=teaching.scaffoldPosition(world,problem,250,64,[{x:0,y:0,width:1200,height:720}]);
   assert.ok(belowOccupied.y>720,'Use empty space below a full viewport; reveal pans there');
   const belowWork=teaching.scaffoldPosition(world,problem,250,74,[{x:100,y:320,width:180,height:55},{x:850,y:650,width:150,height:60}]);
-  assert.equal(belowWork.x,100,'Stay aligned to the working column');
+  assert.equal(belowWork.x+belowWork.width/2,200,'Stay centered on the working column');
   assert.ok(belowWork.y>375 && belowWork.y<650,'Follow the student work, not another column');
-  assert.equal(teaching.scaffoldPosition(world,problem,2000,74,[]).x,100,'Wide steps stay full size in their working column on the infinite canvas');
+  assert.equal(teaching.scaffoldPosition(world,problem,2000,74,[]).x+1000,200,'Wide steps stay centered and full size on the infinite canvas');
   const handwriting=require(join(temp,'tutor/handwriting.js'));
   for(const expression of ['5 * 4 = {{blank}}','2*x + {{blank}} = 14','1/2 + 1/3 = {{blank}}','x^(2+1) = {{blank}}','X + x = {{blank}}']) {
     const drawing=handwriting.layoutHandwriting(expression);
@@ -113,15 +116,20 @@ try {
     {id:'R2',bounds:{x:150,y:310,width:40,height:60},strokeIds:['working-1'],strokeWidth:2},
     {id:'R3',bounds:{x:230,y:310,width:40,height:60},strokeIds:['working-2'],strokeWidth:2},
   ];
-  assert.deepEqual(teaching.handwritingStyle(view.regions),{scale:2,x:150,strokeWidth:2},'Use the latest handwriting line, not a larger question above');
+  assert.deepEqual(teaching.handwritingStyle(view.regions),{scale:2,x:150,bounds:{x:150,y:310,width:120,height:60},strokeWidth:2},'Use the latest handwriting line, not a larger question above');
   await board.captureBoard();
   const write={snapshotId:'test',problemRegionIds:['R1','R2','R3'],regionIds:[],label:'',problem:'2+3*2',scaffold:'2+6={{blank}}'};
   const written=teaching.applyTeachingPlan(write);
   assert.equal(written.stepPlaced,true);
+  assert.equal(teaching.applyTeachingPlan({...write,aiWrites:true}).error,'writing_mode_changed','Switching back stops pending automatic ink');
+  support.updatePreferences({aiWrites:true});
+  assert.equal(teaching.applyTeachingPlan({...write,aiWrites:false}).error,'writing_mode_changed');
+  assert.equal(teaching.applyTeachingPlan({...write,aiWrites:true}).reused,true);
+  support.updatePreferences({aiWrites:false});
   const annotation=store.getTutorAnnotations()[0];
   assert.equal(annotation.handwritingScale,2);
   assert.equal(annotation.handwritingStrokeWidth,2,'Match pen thickness without making large writing artificially bold');
-  assert.equal(annotation.x,150);
+  assert.equal(annotation.x+annotation.width/2,210,'Center the full tutor line beneath the current handwritten line');
   assert.equal(annotation.width,handwriting.layoutHandwriting(write.scaffold).width*2);
   assert.equal(teaching.applyTeachingPlan(write).reused,true);
   assert.equal(store.getTutorAnnotations().length,1,'Repeated tool calls reuse the existing step');
@@ -131,15 +139,50 @@ try {
   assert.equal(store.getTutorAnnotations().length,1);
   assert.equal(filled.template,'2+6=8');
   assert.equal(filled.id,annotation.id);
-  assert.equal(filled.x,annotation.x);
+  assert.equal(filled.x+filled.width/2,annotation.x+annotation.width/2,'Completed steps keep their center as the blank shrinks');
   assert.equal(filled.y,annotation.y);
   assert.equal(filled.handwritingScale,2,'Filling a tutor blank preserves size and position');
+  const continued=teaching.applyTeachingPlan({...write,problem:'2 + 3 * 2',problemRegionIds:['R3'],scaffold:null,completedStep:'3*2=6'});
+  assert.equal(continued.stepPlaced,true);
+  const nextLine=store.getTutorAnnotations().find(a=>a.id===continued.annotationId);
+  assert.equal(nextLine.x+nextLine.width/2,filled.x+filled.width/2,'Partial region selection must not move the established working column');
+  assert.equal(nextLine.handwritingScale,filled.handwritingScale,'Consecutive tutor steps keep the same size');
   store.clearTutorAnnotations();
   const fresh=teaching.applyTeachingPlan(write);
   const freshAnnotation=store.getTutorAnnotations()[0];
   view.regions.push({id:'student-answer',strokeIds:['answer'],bounds:{x:freshAnnotation.x+10,y:freshAnnotation.y+10,width:20,height:30}});
   assert.equal(teaching.applyTeachingPlan({...fill,replaceAnnotationId:fresh.annotationId}).error,'blank_contains_student_ink');
   assert.equal(store.getTutorAnnotations()[0].template,write.scaffold,'Never overwrite a blank the student is filling');
+  store.clearTutorAnnotations();
+  // Screenshot regression: a handwritten answer on the RIGHT of a blank must
+  // not become the next line's left edge or make all subsequent writing bigger.
+  view.regions=[
+    {id:'factor',bounds:{x:100,y:100,width:40,height:60},strokeIds:['factor'],strokeWidth:2},
+    {id:'open',bounds:{x:148,y:85,width:20,height:90},strokeIds:['open'],strokeWidth:2},
+    {id:'two',bounds:{x:175,y:100,width:40,height:60},strokeIds:['two'],strokeWidth:2},
+    {id:'plus',bounds:{x:225,y:118,width:30,height:30},strokeIds:['plus'],strokeWidth:2},
+    {id:'three',bounds:{x:265,y:100,width:40,height:60},strokeIds:['three'],strokeWidth:2},
+    {id:'close',bounds:{x:315,y:85,width:20,height:90},strokeIds:['close'],strokeWidth:2},
+  ];
+  const chain={snapshotId:'test',problemRegionIds:view.regions.map(r=>r.id),regionIds:[],label:'',problem:'5*(2+3)',scaffold:'5*({{blank}})'};
+  assert.equal(teaching.applyTeachingPlan(chain).stepPlaced,true);
+  const blankLine=store.getTutorAnnotations()[0];
+  assert.equal(blankLine.x+blankLine.width/2,217.5,'Center under the whole problem, including its parentheses');
+  assert.equal(blankLine.handwritingScale,2,'Tall parentheses do not increase ordinary digit size');
+  view.regions.push({id:'five',bounds:{x:blankLine.x+blankLine.width*.65,y:blankLine.y+20,width:50,height:100},strokeIds:['student-five'],strokeWidth:2});
+  const second=teaching.applyTeachingPlan({...chain,problemRegionIds:['five'],scaffold:null,completedStep:'5*(5)'});
+  assert.equal(second.stepPlaced,true);
+  const fullLine=store.getTutorAnnotations().find(a=>a.id===second.annotationId);
+  assert.equal(fullLine.x+fullLine.width/2,217.5,'An answer-only region still belongs to its existing centered column');
+  assert.equal(fullLine.handwritingScale,blankLine.handwritingScale,'Answer ink inside a blank cannot enlarge the next row');
+  assert.ok(fullLine.y>=blankLine.y+blankLine.height+28,'Write below the full prior line');
+  const third=teaching.applyTeachingPlan({...chain,problemRegionIds:['five'],scaffold:null,completedStep:'5*(5)=25'});
+  const resultLine=store.getTutorAnnotations().find(a=>a.id===third.annotationId);
+  assert.equal(resultLine.x+resultLine.width/2,217.5);
+  assert.ok(resultLine.y>=fullLine.y+fullLine.height+28);
+  const parentheses=handwriting.layoutHandwriting('5*(5)').paths;
+  assert.ok(parentheses.some(p=>p.d==='M12 -1 C0 6 0 27 11 36'));
+  assert.ok(parentheses.some(p=>p.d==='M2 -1 C14 7 14 27 2 36'));
   store.clearTutorAnnotations();
   detach(); assert.equal(board.getHighlight(),null);
   console.log('Passed: world coordinates, invalid regions, stale images, pause, preferences, ink snapping, focus invalidation, scaffold placement and cleanup.');

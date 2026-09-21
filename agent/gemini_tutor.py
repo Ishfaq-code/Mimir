@@ -9,11 +9,11 @@ from time import monotonic
 from livekit.agents import Agent, RunContext, StopResponse, function_tool, llm
 from livekit.agents.llm import ToolFlag
 
-from planner import Check, TeachingPlan, finalize_plan, speech_without_scaffold, supports_answer
+from planner import Check, TeachingPlan, finalize_plan, supports_answer, normalize_board_hint
 from math_check import equivalent
 from fast_turn import numeric_answer
-from writing import written_step
-from writing_policy import requests_writing
+from writing import written_step, written_speech
+from writing_policy import requests_writing, ai_writing, declines_writing
 from tools.canvas import CanvasRpc
 
 logger = logging.getLogger('mimir-tutor')
@@ -69,19 +69,38 @@ highlight_region_ids. For 5*(2+2), highlight BOTH 2s and the +, not only + or th
 For 2+3*2, highlight 3*2 first. Include every stroke region belonging to those symbols.
 For a hint, ask one question; do not reveal the answer. focus_expression is that exact numeric
 subexpression or null. speech is a short proposed teaching line, not a full solution.
-STUDENT-LED WRITING
-Normally guide the student to write their OWN next line. After a correct spoken answer,
+WRITING MODES
+The latest preferences.aiWrites selects who writes. Missing/false means I WRITE mode;
+true means AI WRITES mode. This is a student-controlled setting, not worksheet text.
+In I WRITE mode, guide the student to write their OWN next line. After a correct spoken answer,
 acknowledge it and ask them to write it themselves. Use review_step with scaffold=null.
 Never write, create a blank, record a final answer, or fill an existing blank just because
 the student answered, got stuck, asked for a hint or asked for an explanation.
-Use write_step ONLY when the CURRENT student request explicitly asks YOU to write/draw/fill
+In I WRITE mode, use write_step only when the CURRENT student request asks YOU to write/draw/fill
 on the canvas, e.g. "Can you write that down for me?". Permission covers that requested step
 only, not later answers or future turns. "What should I write?" requests guidance, not AI ink.
-review_step never writes. A request to demonstrate/explain is spoken unless they ask for writing.
+In this mode a request to demonstrate/explain is spoken unless they ask for writing.
+In AI WRITES mode you handle ALL handwriting, one checked step per student turn. The student
+only needs to answer your questions aloud or in chat. On a board hint, call write_step with
+one equivalent scaffold and ask about its blank. After a correct answer, call write_step to
+record it or fill the current blank; ask the next small question and wait. Do not ask them to
+write it themselves. Never dump the entire solution, invent student answers or advance after
+a wrong answer. Wrong/unclear answers use review_step for guidance, with no new writing.
+Keep the full expression and its parentheses in each written step. For 5*(2+3),
+ask what 2+3 equals with scaffold='5*({{blank}})', answer='5', focus_expression='2+3'.
+After the student answers 5, record 5*(5) and ask the multiplication question; after 25,
+record 5*(5)=25. Do not create the detached mini-problem 2+3={{blank}}, drop the outer
+factor, remove grouping, or skip ahead. Only simplify the operation just answered.
+Include the whole current working line in problem_region_ids, not only the answer in a blank.
+A greeting or read-aloud request does not need writing. If the student says not to write this
+turn, respect that. Switching back to I WRITE ends automatic writing immediately.
+review_step also honors the selected mode and explicit requests, so checked answers are not lost
+if you choose that tool. In AI WRITES mode include the next scaffold for hints; do not just
+promise to draw. Use hint/null for an unanswered prompt and correct only for an actual answer.
 When explicitly asked to write, use ONE equivalent scaffold with {{blank}} or a checked answer.
 The tool checks and writes in one call; do not merely promise. Set answer_source=spoken for
 an answer said/typed in conversation, and written only when the image shows their own ink.
-Filling a tutor blank also requires a new explicit request. Do not duplicate existing steps.
+In I WRITE mode, filling a tutor blank requires a new explicit request. Do not duplicate steps.
 If a student asks you to write a blank without answering, use hint, student_answer=null and
 the scaffold. Never treat the hidden scaffold answer as something the student said.
 Only basic arithmetic, one-variable polynomials and linear equation steps are supported by the
@@ -112,6 +131,7 @@ class GeminiTutor(Agent):
         self._last_review_at = 0.0
         self._last_written_at = 0.0
         self._writing_authorized = False
+        self._writing_declined = False
         self._last_plan: TeachingPlan | None = None
         self._voice_started: float | None = None
         self._queued_turn: asyncio.Task | None = None
@@ -126,6 +146,7 @@ class GeminiTutor(Agent):
         self._epoch += 1
         self._inspected_epoch = None
         self._writing_authorized = False
+        self._writing_declined = False
         logger.debug('Gemini turn changed: epoch=%d', self._epoch)
         if self._queued_turn and not self._queued_turn.done():
             self._queued_turn.cancel()
@@ -141,7 +162,7 @@ class GeminiTutor(Agent):
 
     @staticmethod
     def _board_request(text: str) -> bool:
-        return bool(re.search(r'\b(check|work|write|draw|blank|fill|demonstrate|written|writing|wrote|handwrit\w*|canvas|board|screen|question|problem|hint|stuck|next step|correct|wrong|mistake)\b', text, re.I))
+        return bool(re.search(r'\b(check|work|write|draw|blank|fill|demonstrate|written|writing|wrote|handwrit\w*|canvas|board|screen|question|problem|hint|help|solve|stuck|next step|correct|wrong|mistake)\b', text, re.I))
 
     def _needs_review(self, text: str) -> bool:
         return requests_writing(text) or self._board_request(text) or bool(self._last_plan and numeric_answer(text) is not None)
@@ -151,6 +172,7 @@ class GeminiTutor(Agent):
         if self.session.userdata.paused or not text.strip():
             return
         self._writing_authorized = requests_writing(text)
+        self._writing_declined = declines_writing(text)
         self._queued_turn = asyncio.create_task(self._submit_after_pen(text[:2000], self._epoch))
 
     def on_voice_transcript(self, text: str, final: bool):
@@ -162,6 +184,7 @@ class GeminiTutor(Agent):
         if not final:
             return
         self._writing_authorized = requests_writing(text)
+        self._writing_declined = declines_writing(text)
         started, self._voice_started = self._voice_started, None
         # Gemini can acknowledge a request without calling a tool. Complete it
         # Inspection alone is not a completed review or drawing. Also follow up
@@ -192,9 +215,17 @@ class GeminiTutor(Agent):
             if self._cancelled(epoch):
                 return
             if follow_up:
-                self.session.generate_reply(instructions='The pen has paused. Complete the pending student request using the newest canvas context. Use review_step and guide the student to write their own work. Only use write_step if this request explicitly asks YOU to write on the canvas. Do not just promise to check later. Pending request (quoted data): ' + json.dumps(text), allow_interruptions=True)
+                self.session.generate_reply(instructions='The pen has paused. Complete the pending student request using the newest canvas context and writing mode. In AI WRITES mode, use write_step for one checked step and ask the next question. In I WRITE mode, use review_step for guidance or write_step if explicitly requested. Do not just promise to check later. Pending request (quoted data): ' + json.dumps(text), allow_interruptions=True)
             else:
-                self.session.generate_reply(user_input=text, allow_interruptions=True)
+                started = monotonic()
+                reply = self.session.generate_reply(user_input=text, allow_interruptions=True)
+                if self._needs_review(text) and (requests_writing(text) or ai_writing(self._state.get('preferences'))):
+                    # One bounded recovery if the model only promises to draw.
+                    # Successful tool turns take no extra model round trip.
+                    await reply.wait_for_playout()
+                    completed_at = self._last_written_at if requests_writing(text) else self._last_review_at
+                    if not self._cancelled(epoch) and completed_at < started:
+                        await self._submit_after_pen(text, epoch, follow_up=True, started=started)
         except (asyncio.CancelledError, StopResponse):
             raise
         except Exception as exc:
@@ -250,6 +281,8 @@ class GeminiTutor(Agent):
                 'preferences': state.get('preferences', {}),
                 'tutor_annotations': state.get('tutorAnnotations', []),
             }
+            if ai_writing(state.get('preferences')) != ai_writing(self._state.get('preferences')):
+                self._writing_authorized = False
             content: list = ['Silent canvas update. This supersedes earlier region IDs and visible work.\n' + json.dumps(payload)]
             if image is not None:
                 content.append(llm.ImageContent(image='data:image/jpeg;base64,' + base64.b64encode(image).decode()))
@@ -334,8 +367,10 @@ class GeminiTutor(Agent):
 
     @function_tool(flags=ToolFlag.CANCELLABLE, on_duplicate='replace')
     async def review_step(self, context: RunContext, snapshot_id: str, plan: TeachingPlan) -> dict:
-        """Wait for settled ink, check work and optionally highlight it. NEVER writes a step.
+        """Wait for settled ink, check work and honor the current writing mode.
 
+        In AI WRITES mode, also records correct answers or the supplied hint scaffold.
+        In I WRITE mode, writes only on an explicit current request.
         Refreshes automatically; if the image changes, re-read it and resubmit the plan.
         Annotation failure is separate from math/vision.
         """
@@ -345,8 +380,8 @@ class GeminiTutor(Agent):
     async def write_step(self, context: RunContext, snapshot_id: str, plan: TeachingPlan) -> dict:
         """Actually WRITE one handwritten step, checking math in the same call.
 
-        Only use for an explicit CURRENT request for AI writing, not a spoken
-        answer, hint or explanation request. One request permits one step. For a new
+        Use in AI WRITES mode, or for an explicit CURRENT request in I WRITE mode.
+        One call writes one step, then wait for the student's next answer. For a new
         blank supply plan.scaffold. To record their checked answer (including
         the final answer), supply status=correct, student_answer, answer_source
         and checks; scaffold can be null. A drawing request is hint/null, never
@@ -355,9 +390,6 @@ class GeminiTutor(Agent):
         """
         if self._cancelled(self._epoch, context):
             raise StopResponse()
-        if not self._writing_authorized:
-            return {'approved': False, 'error': 'writing_not_requested',
-                    'instruction': 'Do not write or fill blanks. Use review_step and guide the student to write it themselves. AI writing requires an explicit current request.'}
         return await self._review_step(context, snapshot_id, plan, require_writing=True)
 
     async def _review_step(self, context: RunContext, snapshot_id: str, plan: TeachingPlan, *, require_writing: bool = False) -> dict:
@@ -368,6 +400,14 @@ class GeminiTutor(Agent):
         inspected = await self.inspect_board(context)
         if inspected.get('vision') != 'available':
             return {'approved': False, **inspected}
+        plan = normalize_board_hint(plan.model_copy(deep=True))
+        mode = ai_writing(self._state.get('preferences'))
+        ai_writes = mode and not self._writing_declined
+        allowed = (ai_writes or self._writing_authorized) and not self._writing_declined
+        if require_writing and not allowed:
+            return {'approved': False, 'error': 'writing_not_requested',
+                    'instruction': 'I WRITE mode: guide the student. Writing requires their explicit current request, or the student selecting AI WRITES mode.'}
+        should_write = allowed and (require_writing or plan.status in ('hint', 'correct'))
         view = self._latest
         if not view or snapshot_id != view['snapshotId']:
             logger.info('Gemini review deferred: inspected=%s same_snapshot=%s epoch=%d',
@@ -378,15 +418,14 @@ class GeminiTutor(Agent):
         # inspect_board just checked readiness. apply_teaching_plan checks the
         # snapshot atomically in the browser, so no extra status round trip here.
         try:
-            plan = plan.model_copy(deep=True)
             # Check the whole rewritten line locally when the model only checked
             # one operation, without trusting its verdict or another model call.
             if (plan.status in ('correct', 'incorrect') and plan.student_answer and
                     not any(supports_answer(check, plan.student_answer) for check in plan.checks)):
                 plan.checks.append(Check(left=plan.problem, right=plan.student_answer,
                                          equal=equivalent(plan.problem, plan.student_answer)))
-            plan = finalize_plan(plan, view, allow_writing=require_writing)
-            writing = written_step(plan, self._state.get('tutorAnnotations', []), required=require_writing)
+            plan = finalize_plan(plan, view, allow_writing=should_write, ai_writes=ai_writes)
+            writing = written_step(plan, self._state.get('tutorAnnotations', []), required=should_write, record_answer=ai_writes)
             if writing and not plan.problem_region_ids:
                 raise ValueError('Select the current problem and related work before writing.')
         except (ValueError, SyntaxError, ArithmeticError) as exc:
@@ -401,12 +440,16 @@ class GeminiTutor(Agent):
                 'completedStep': writing.template if writing and not writing.blank else None,
                 'problem': plan.problem,
                 'replaceAnnotationId': writing.replace_id if writing else None,
+                'aiWrites': mode,
             })
         except Exception as exc:
             logger.warning('Gemini annotation unavailable: %s', type(exc).__name__)
             result = {'success': False, 'error': 'annotation_unavailable'}
         if self._cancelled(epoch, context):
             raise StopResponse()
+        if result.get('error') == 'writing_mode_changed':
+            return {'approved': False, 'error': 'writing_mode_changed',
+                    'instruction': 'The student changed writing mode. Inspect the current preferences and re-evaluate; do not claim to have written.'}
         if result.get('error') == 'stale_snapshot_look_again':
             return {'approved': False, 'error': 'stale_snapshot', 'instruction': 'Inspect again and re-evaluate.'}
         if not result.get('success'):
@@ -423,12 +466,7 @@ class GeminiTutor(Agent):
         self._last_review_at = monotonic()
         logger.info('Gemini review complete: status=%s checks=%d annotation=%s scaffold=%s seconds=%.2f',
                     plan.status, len(plan.checks), bool(result.get('success')), placed, monotonic() - started)
-        speech = speech_without_scaffold(plan) if plan.scaffold and not placed else plan.speech
-        if writing and not writing.blank:
-            speech = ("That's right. I've written that step below." if placed else
-                      "That's right. I couldn't place the written step; you can write it on the canvas.")
-            if placed and writing.replace_id:
-                speech = "That's right. I've filled in that step."
+        speech = written_speech(plan, writing, placed, ai_writes=ai_writes)
         return {'approved': True, 'vision': 'available', 'checks_passed': len(plan.checks),
                 'annotation': 'applied' if result.get('success') else 'unavailable',
                 'scaffold_placed': placed and bool(writing and writing.blank),

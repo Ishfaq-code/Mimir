@@ -35,7 +35,7 @@ The current hackathon visit is held in memory: reload loses drawings and questio
 | Area | User's direction |
 | --- | --- |
 | Student work | Freehand math is primary. An optional Text tool supports typed boxes on the canvas. |
-| Workspace | Infinite/free canvas; this supersedes the earlier single-notebook-page idea. |
+| Workspace | Infinite/free canvas. One finger pans, two fingers pinch to zoom; Apple Pencil uses the selected drawing tool. |
 | Controls | Pen, Eraser, and Text, with white ink available. No automatic selection box after each stroke. |
 | Conversation | Natural live voice conversation, with the tutor able to follow the student's work. Standard Gemini 3.8 Live is the default single-model tutor over LiveKit; the checked OpenAI path is optional. |
 | Intervention | When the student asks a question or their work is clearly going in the wrong direction. |
@@ -102,7 +102,7 @@ The workspace now includes a Learning tools popover with live captions, one-step
 
 - Production suitability and configuration of the current MyScript and LiveKit/OpenAI integrations. These arrived from collaborators on `main`; they are implemented code, not a newly purchased service.
 - Semantic end-of-step detection and proactive intervention confidence. Requested checks now wait for a one-second pen-up pause and automatically retry when the work changes during checking.
-- How the student navigates an infinite canvas with touch while the Pencil draws.
+- Physical iPad validation of finger pan/pinch, Pencil priority, and palm contact behavior. Gesture logic is covered by automated tests.
 - Durable persistence, full voice/recognition validation on iPad, and general visual explanations. Screenshot OCR currently targets printed English questions and basic algebra; complex mathematical layout may need correction.
 
 Implementation facts and a suggested build order live in [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md). Visual values extracted from the current app live in [DESIGN.md](DESIGN.md).
@@ -111,6 +111,6 @@ Legacy OpenAI reliability and latency refinement (2026-09-20): math teaching use
 
 Writing flow (2026-09-20): a requested review stays pending while the student draws, erases, moves content, or edits a textbox, and continues after a one-second pause. A new question, Stop, Pause, or disconnect cancels the pending turn. If new ink invalidates a check, the tutor captures the settled work again without asking the student to repeat the request. Tutor scaffolds use animated SVG pen paths, aligned below the current working column with a wide blank for the student. Placement avoids existing content and reveals more canvas below when needed. A pause in pen input does not prove the student has finished solving the problem; the tutor should check the latest completed step.
 
-Student writing decision (2026-09-20): Mimir guides the student to write their own work. It only writes or fills a step when the student explicitly asks the AI to do so; a correct spoken answer, a request for help, or an unfinished blank is not permission. Each request authorizes one written step. This supersedes earlier automatic-scaffold and spoken-answer completion behavior. Requested handwritten steps follow the size, pen thickness and alignment of the latest related student line. Repeated tool calls reuse an existing tutor step, and student ink is never replaced. This matches layout and pen weight, not the student's individual letter shapes.
+Writing modes decision (2026-09-20): the student chooses **I write** (default) or **AI writes** in the header. In I write, Mimir guides the student; each explicit request for AI writing permits one step. In AI writes, Mimir handles handwriting while the student answers aloud or in chat. It writes one checked step per turn, records correct answers, fills tutor blanks, and asks the next small question. It does not dump the full solution or advance on wrong/uncertain answers. Switching back stops automatic writing without erasing work; a spoken request not to write is respected for that turn. This supersedes the earlier globally opt-in writing decision. Steps match the current full line's symbol size and thickness and stay centered in a vertical sequence below the work. Keep the full expression, parentheses and unchanged terms visible; simplify only the current operation. An answer inside a blank is part of its existing line, not a new column. This matches scale rather than the student's individual letter shapes. Repeated calls reuse steps and student ink is never replaced.
 
 Default tutor decision (2026-09-20): use standard Gemini 3.8 Live for voice, canvas understanding and teaching in one session. Local code retains pen-pause timing, arithmetic/algebra validation and stroke-based highlights/SVG placement. Changed settled frames arrive silently at most once per second; the current frame goes directly to checked review, without a mandatory separate inspection tool call. The earlier OpenAI planner/TTS mode remains optional. This choice prioritizes implementation simplicity and responsiveness; no universal fastest-model or accuracy claim is established.

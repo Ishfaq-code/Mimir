@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import LearningControls from "./LearningControls";
+import WritingModeSwitch from "./WritingModeSwitch";
 import { loadPreferences, useLearningPreferences } from "@/lib/tutor/support";
 import { AnimatePresence } from "motion/react";
 import { useScreenshotQuestion } from "@/lib/useScreenshotQuestion";
@@ -138,6 +139,7 @@ export default function PracticeWorkspace() {
     <div className="practice-app" data-theme={dark ? "dark" : "light"} data-calm={preferences.calm} data-large-text={preferences.largeText} data-roomy-text={preferences.roomyText}>
       <header className="app-header" inert={visualizationOpen}>
         <div className="wordmark" aria-label="Mimir"><span className="brand-symbol"><MimirMark /></span>mimir<span className="brand-period">.</span></div>
+        <WritingModeSwitch />
         <div className="header-actions">
           <LearningControls />
           <button className="icon-button theme-toggle" onClick={() => setDark(value => !value)} aria-label={dark ? "Use light theme" : "Use dark theme"}><Icon name={dark ? "sun" : "moon"} size={19}/></button>

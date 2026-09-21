@@ -76,3 +76,20 @@ def valid_scaffold(template: str, answer: str, source: str) -> bool:
         left,right = completed.split('=')
         return equivalent(source, left) and equivalent(left, right)
     return equivalent(source, completed)
+
+
+def related_calculation(problem: str, expression: str) -> bool:
+    """A calculation must concern this problem, not unrelated valid arithmetic."""
+    try:
+        if equivalent(problem, expression):
+            return True
+    except ValueError:
+        pass
+    polynomial(expression)
+    target = ast.dump(ast.parse(expression.strip().replace('^', '**'), mode='eval').body)
+    for side in problem.split('='):
+        polynomial(side)
+        tree = ast.parse(side.strip().replace('^', '**'), mode='eval')
+        if any(ast.dump(node) == target for node in ast.walk(tree)):
+            return True
+    return False

@@ -5,8 +5,9 @@ from time import perf_counter
 
 from livekit.agents import Agent
 from prompts import TUTOR_INSTRUCTIONS
-from planner import Planner, finalize_plan, speech_without_scaffold
-from writing_policy import requests_writing
+from planner import Planner, finalize_plan
+from writing import written_step, written_speech
+from writing_policy import requests_writing, ai_writing, declines_writing
 from tools.canvas import CanvasRpc
 from preparation import BoardPreparation
 from fast_turn import is_hint_request, fast_answer, numeric_answer, anticipated_confirmation
@@ -232,6 +233,10 @@ class MathTutor(Agent):
                 raise
         captured = perf_counter()
         self._slower = bool(status.get('preferences',state.get('preferences', {})).get('slowerVoice'))
+        preferences = status.get('preferences', state.get('preferences', {}))
+        if ai_writing(preferences) != ai_writing(state.get('preferences')):
+            plan = None  # A prepared hint from the other writing mode is not reusable.
+        state = {**state, 'preferences': preferences}
         if plan is None and getattr(self,'_last_plan',None) and self._last_plan_revision==view.get('revision'):
             plan=fast_answer(text,self._last_plan,view)
             if plan:route='local-answer'
@@ -247,7 +252,12 @@ class MathTutor(Agent):
             plan = await self._planner.plan(text, state, view, image, self._history, self._active)
         # Cached hints and local numeric-answer plans obey the same writing
         # policy as live planning. A correct answer is not a request for AI ink.
-        plan = finalize_plan(plan.model_copy(deep=True), view, allow_writing=requests_writing(text))
+        mode = ai_writing(status.get('preferences', state.get('preferences', {})))
+        ai_writes = mode and not declines_writing(text)
+        allowed = ai_writes or requests_writing(text)
+        plan = finalize_plan(plan.model_copy(deep=True), view, allow_writing=allowed, ai_writes=ai_writes)
+        writing = written_step(plan, state.get('tutorAnnotations', []),
+                               required=allowed and plan.status in ('hint', 'correct'), record_answer=ai_writes)
         checked = perf_counter()
         if epoch != self._epoch or self.session.userdata.paused: return True
         if self.session.user_state == 'speaking': return True
@@ -256,19 +266,21 @@ class MathTutor(Agent):
             result = await self._canvas.call('apply_teaching_plan', {
                 'snapshotId':view['snapshotId'], 'problemRegionIds':plan.problem_region_ids,
                 'regionIds':plan.highlight_region_ids, 'label':plan.highlight_label,
-                'scaffold':plan.scaffold.template if plan.scaffold else None,
+                'scaffold':writing.template if writing and writing.blank else None,
+                'completedStep':writing.template if writing and not writing.blank else None,
+                'replaceAnnotationId':writing.replace_id if writing else None,
+                'problem':plan.problem, 'aiWrites':mode,
             })
         except Exception as exc:
             logger.warning('Annotation failed after math check: %s', type(exc).__name__)
             result = {'success': False, 'error': 'annotation_unavailable'}
         if not result.get('success'):
-            if result.get('error') == 'stale_snapshot_look_again': return False
+            if result.get('error') in ('stale_snapshot_look_again', 'writing_mode_changed'): return False
             current = await self._canvas.call('get_board_status', {})
             if not current.get('ready') or current.get('revision') != view.get('revision'): return False
             logger.warning('Annotation declined after math check: %s', result.get('error'))
-        speech = plan.speech
-        if plan.scaffold and not result.get('scaffoldPlaced'):
-            speech = speech_without_scaffold(plan)
+        placed = bool(writing and result.get('stepPlaced', result.get('scaffoldPlaced')))
+        speech = written_speech(plan, writing, placed, ai_writes=ai_writes)
         self._active = {'problem':plan.problem, 'bounds':result.get('problemBounds')} if plan.problem_region_ids else None
         self._history.extend([{'role':'student','text':text}, {'role':'tutor','text':speech}])
         self._history = self._history[-8:]

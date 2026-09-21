@@ -31,6 +31,7 @@ export interface TutorLatexAnnotation {
   problem?: string;
   sourceStrokeIds?: string[];
   sourceBounds?: BoundingBox;
+  columnCenterX?: number;
   width?: number;
   height?: number;
   x: number;

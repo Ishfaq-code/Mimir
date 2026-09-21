@@ -17,6 +17,7 @@ import type {
 } from "@/lib/canvas/types";
 import { DEFAULT_STYLE, pointXY } from "@/lib/canvas/types";
 import { textWrapWidth, wrapPlainText } from "@/lib/canvas/text";
+import { TouchNavigation } from "@/lib/canvas/touchNavigation";
 import { renderScene, type CanvasScreenshot } from "@/lib/canvas/renderer";
 import { captureScene, snapToInk } from "@/lib/canvas/capture";
 import { registerBoardSource, clearHighlight, getHighlight, subscribeHighlight, getFocus } from "@/lib/tutor/boardView";
@@ -251,6 +252,7 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
   const styleRef = useRef<ElementStyle>({ ...DEFAULT_STYLE, strokeColor: dark ? "#ffffff" : DEFAULT_STYLE.strokeColor });
   const darkRef = useRef(dark);
   const activePointerRef = useRef<number | null>(null);
+  const touchNavigationRef = useRef(new TouchNavigation());
   const lastInteractionRef = useRef(-Infinity);
 
   const actionRef = useRef<Action>({ type: "none" });
@@ -440,7 +442,7 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
 
   useEffect(() => registerBoardSource({
     revision: sceneRevision,
-    isBusy: () => actionRef.current.type !== "none" || !!textDraftRef.current,
+    isBusy: () => actionRef.current.type !== "none" || touchNavigationRef.current.active || !!textDraftRef.current,
     isSettled: () => performance.now() - lastInteractionRef.current >= 1000,
     reveal: bounds => {
       const cam = cameraRef.current;
@@ -454,7 +456,7 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
     },
     hasContent: () => !!screenshotRef.current || elementsRef.current.some(el=>!el.isDeleted),
     capture: () => {
-      if (actionRef.current.type !== "none" || textDraftRef.current) return Promise.reject(new Error("Student is writing; try again after they finish"));
+      if (actionRef.current.type !== "none" || touchNavigationRef.current.active || textDraftRef.current) return Promise.reject(new Error("Student is writing; try again after they finish"));
       const rect = canvasRef.current!.getBoundingClientRect();
       return captureScene(elementsRef.current, screenshotRef.current, { ...cameraRef.current }, rect.width, rect.height, darkRef.current, sceneRevision()).then(capture => {
         capture.view.obstacles?.push(...graphsRef.current.map(graph => ({x:graph.x,y:graph.y,width:graph.w,height:graph.h})));
@@ -890,8 +892,39 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
 
   // ── pointer handlers ────────────────────────────────────────────
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const beginTextAt = (wp: { x: number; y: number }) => {
+    const hit = hitTest(elementsRef.current, wp.x, wp.y);
+    const existing = hit?.type === "text" ? hit : null;
+    const draft: TextDraft = {
+      key: genId(), elementId: existing?.id,
+      x: existing?.x ?? wp.x, y: existing?.y ?? wp.y,
+      text: existing?.text ?? "", color: existing?.style.strokeColor ?? styleRef.current.strokeColor,
+      fontSize: existing?.fontSize ?? 20,
+      wrapWidth: textWrapWidth(canvasRef.current?.clientWidth ?? 640, cameraRef.current.zoom, existing?.width),
+    };
+    textDraftRef.current = draft;
+    setEditingText(draft);
+    actionRef.current = { type: "none" };
+    render();
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLElement>, latexTarget?: LatexOverlay) => {
+    if (e.pointerType === "touch") {
+      e.preventDefault();
+      // Palm contacts must never move the page underneath an active Pencil.
+      if (activePointerRef.current !== null) return;
+      lastInteractionRef.current = performance.now();
+      touchNavigationRef.current.begin(e.pointerId, screenPos(e), cameraRef.current, toolRef.current === "text" && !spaceRef.current);
+      canvasRef.current?.setPointerCapture(e.pointerId);
+      return;
+    }
     if (activePointerRef.current !== null || (e.button !== 0 && e.button !== 1)) return;
+    if (touchNavigationRef.current.active) {
+      if (e.pointerType !== "pen") return;
+      for (const id of touchNavigationRef.current.clear()) {
+        if (canvasRef.current?.hasPointerCapture(id)) canvasRef.current.releasePointerCapture(id);
+      }
+    }
     lastInteractionRef.current = performance.now();
     activePointerRef.current = e.pointerId;
     canvasRef.current?.setPointerCapture(e.pointerId);
@@ -902,8 +935,8 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
 
     if (activeTool === "select" && e.button === 0) {
       const tolerance = 10 / cam.zoom;
-      const selectedElement = elementsRef.current.find((el) => selectedRef.current.has(el.id) && !el.isDeleted && resizeHandleAt(wp, elementBounds(el), tolerance));
-      const selectedScreenshot = screenshotRef.current && selectedScreenshotRef.current ? resizeHandleAt(wp, screenshotBounds(screenshotRef.current), tolerance) : null;
+      const selectedElement = !latexTarget ? elementsRef.current.find((el) => selectedRef.current.has(el.id) && !el.isDeleted && resizeHandleAt(wp, elementBounds(el), tolerance)) : undefined;
+      const selectedScreenshot = !latexTarget && screenshotRef.current && selectedScreenshotRef.current ? resizeHandleAt(wp, screenshotBounds(screenshotRef.current), tolerance) : null;
       const resizeTarget = selectedScreenshot ? SCREENSHOT_ID : selectedElement?.id;
       const resizeHandle = selectedScreenshot ?? (selectedElement ? resizeHandleAt(wp, elementBounds(selectedElement), tolerance) : null);
       if (resizeTarget && resizeHandle) {
@@ -912,7 +945,7 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
         return;
       }
 
-      const latexHit = Object.values(latexOverlaysRef.current).reverse().find((overlay) => pointInBounds(wp, overlay.bounds, tolerance));
+      const latexHit = latexTarget ?? Object.values(latexOverlaysRef.current).reverse().find((overlay) => pointInBounds(wp, overlay.bounds, tolerance));
       const hit = latexHit ? null : hitTest(elementsRef.current, wp.x, wp.y);
       const screenshotHit = !hit && !latexHit && screenshotRef.current && pointInBounds(wp, screenshotBounds(screenshotRef.current), tolerance);
       if (hit || latexHit || screenshotHit) {
@@ -973,7 +1006,7 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
       selectedScreenshotRef.current = false;
     }
 
-    if (e.button === 1 || activeTool === "hand" || (e.pointerType === "touch" && activeTool !== "text")) {
+    if (e.button === 1 || activeTool === "hand") {
       actionRef.current = { type: "panning", startCam: { x: cam.x, y: cam.y }, startPtr: sp };
       return;
     }
@@ -1015,19 +1048,7 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
       }
       case "text": {
         e.preventDefault();
-        const hit = hitTest(elementsRef.current, wp.x, wp.y);
-        const existing = hit?.type === "text" ? hit : null;
-        const draft: TextDraft = {
-          key: genId(), elementId: existing?.id,
-          x: existing?.x ?? wp.x, y: existing?.y ?? wp.y,
-          text: existing?.text ?? "", color: existing?.style.strokeColor ?? styleRef.current.strokeColor,
-          fontSize: existing?.fontSize ?? 20,
-          wrapWidth: textWrapWidth(canvasRef.current?.clientWidth ?? 640, cameraRef.current.zoom, existing?.width),
-        };
-        textDraftRef.current = draft;
-        setEditingText(draft);
-        actionRef.current = { type: "none" };
-        render();
+        beginTextAt(wp);
         break;
       }
       case "eraser": {
@@ -1046,6 +1067,18 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (touchNavigationRef.current.has(e.pointerId)) {
+      e.preventDefault();
+      const camera = touchNavigationRef.current.move(e.pointerId, screenPos(e));
+      if (camera) {
+        cameraRef.current = camera;
+        setZoomUI(Math.round(camera.zoom * 100));
+        setOverlayCamera(camera);
+        setOverlayVersion((version) => version + 1);
+        render();
+      }
+      return;
+    }
     if (e.pointerId !== activePointerRef.current) return;
     const act = actionRef.current;
     if (act.type === "none") return;
@@ -1191,9 +1224,17 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (touchNavigationRef.current.has(e.pointerId)) {
+      lastInteractionRef.current = performance.now();
+      const tap = touchNavigationRef.current.end(e.pointerId, screenPos(e), cameraRef.current, e.type !== "pointerup");
+      if (canvasRef.current?.hasPointerCapture(e.pointerId)) canvasRef.current.releasePointerCapture(e.pointerId);
+      if (tap && toolRef.current === "text") beginTextAt(screenToWorld(tap.x, tap.y, cameraRef.current));
+      return;
+    }
     if (e.pointerId !== activePointerRef.current) return;
     lastInteractionRef.current = performance.now();
     activePointerRef.current = null;
+    if (canvasRef.current?.hasPointerCapture(e.pointerId)) canvasRef.current.releasePointerCapture(e.pointerId);
     const act = actionRef.current;
 
     if (act.type === "drawing") {
@@ -1522,6 +1563,7 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onLostPointerCapture={handlePointerUp}
         onContextMenu={event => {
           event.preventDefault();
           const sp = screenPos(event);
@@ -1569,48 +1611,7 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
           dangerouslySetInnerHTML={{ __html: html }}
           onPointerDown={tool === "select" ? (e) => {
             e.stopPropagation();
-            const ids = overlay.strokeIds;
-            if (e.shiftKey) {
-              const allSelected = ids.every((id) => selectedRef.current.has(id));
-              if (allSelected) ids.forEach((id) => selectedRef.current.delete(id));
-              else ids.forEach((id) => selectedRef.current.add(id));
-            } else if (!ids.every((id) => selectedRef.current.has(id))) {
-              selectedRef.current.clear();
-              selectedScreenshotRef.current = false;
-              ids.forEach((id) => selectedRef.current.add(id));
-            }
-            syncSelectedLatex();
-            render();
-            // Deferred drag: only start moving after pointer moves > 4px
-            const startX = e.clientX;
-            const startY = e.clientY;
-            const threshold = 4;
-            let dragging = false;
-            const onMove = (ev: PointerEvent) => {
-              if (!dragging && Math.hypot(ev.clientX - startX, ev.clientY - startY) > threshold) {
-                dragging = true;
-                const r = canvasRef.current!.getBoundingClientRect();
-                const sp = { x: startX - r.left, y: startY - r.top };
-                const wp = screenToWorld(sp.x, sp.y, cameraRef.current);
-                const offsets: Record<string, { x: number; y: number }> = {};
-                for (const el of elementsRef.current) {
-                  if (selectedRef.current.has(el.id)) offsets[el.id] = { x: el.x - wp.x, y: el.y - wp.y };
-                }
-                const overlayBounds: Record<string, { x: number; y: number; w: number; h: number }> = {};
-                for (const ov of Object.values(latexOverlaysRef.current)) {
-                  if (ov.strokeIds.some((sid) => selectedRef.current.has(sid))) overlayBounds[ov.id] = { ...ov.bounds };
-                }
-                activePointerRef.current = e.pointerId;
-                canvasRef.current?.setPointerCapture(e.pointerId);
-                actionRef.current = { type: "moving", elementIds: [...selectedRef.current], offsets, startPointer: { ...wp }, screenshotOffset: null, overlayBounds };
-              }
-            };
-            const onUp = () => {
-              window.removeEventListener("pointermove", onMove);
-              window.removeEventListener("pointerup", onUp);
-            };
-            window.addEventListener("pointermove", onMove);
-            window.addEventListener("pointerup", onUp);
+            handlePointerDown(e, overlay);
           } : undefined}
         />
       ))}

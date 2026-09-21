@@ -99,7 +99,11 @@ The backend and worker must use the same `LIVEKIT_AGENT_NAME` (default `mimir-tu
 
 You can ask Mimir to check while still writing. The request waits until the pen has been up for one second; more writing resets that pause. Changes during checking trigger a fresh snapshot automatically. Stop, Pause, a new question, or ending the conversation cancels the pending check. Tutor steps animate as handwritten SVG strokes below the working column, avoiding existing content. Calm motion skips the drawing animation. Pen inactivity is a timing signal, not proof that a solution is complete.
 
-Mimir guides students to write their own steps by default. The `review_step` tool never adds or fills an equation. Only an explicit request such as “Write that down for me” authorizes `write_step`, which verifies and writes one step in one call. Spoken answers and requests for help do not authorize writing, and permission does not carry over to later answers. Requested writing can add a next-step blank, record a checked answer, or fill an existing tutor blank in place. It follows the latest selected ink's size, pen width and left alignment; repeated requests reuse the same step. Original student strokes stay untouched, and a blank containing new student ink cannot be replaced.
+Choose **I write** or **AI writes** in the header. I write is the default: Mimir guides the student to write, with a one-step exception for explicit requests such as “Write that down for me.” AI writes lets the student answer aloud or in chat while Mimir writes each checked step and fills its blanks, one turn at a time. It waits for the next answer instead of dumping the whole solution; wrong or unclear answers stay at the current step. The choice is remembered on this device and takes effect during an active conversation. Switching back blocks pending automatic writing.
+
+Both `review_step` and `write_step` honor the selected mode, so choosing a review tool cannot silently lose authorized writing. A typed request that receives only a promise gets one follow-up, with no extra model turn after a successful check. Writing follows the current full line's symbol size and pen width, with each step centered directly below it. A handwritten answer inside a blank cannot move the column or enlarge later writing; repeated requests reuse the same step. Full-expression steps retain parentheses and unchanged terms: for `5*(2+3)`, the inner answer produces `5*(5)`, then the final answer produces `5*(5)=25`. Original student strokes stay untouched; if the student writes inside a blank, the checked full line is recorded below rather than replacing their ink.
+
+On iPad, keep Pen selected and drag the canvas with one finger; pinch with two fingers to zoom. Apple Pencil draws and takes priority over finger navigation. Fingers resting during a Pencil stroke are ignored until lifted. This works in Select and Eraser too; in Text mode, a stationary tap opens the editor while dragging pans. Physical iPad/Pencil validation is still pending.
 
 ## OCR assets
 
@@ -114,9 +118,11 @@ From `frontend/`:
 ```bash
 npm run build
 npm run lint
+node scripts/test-touch-navigation.mjs
+node scripts/test-board-support.mjs
 ```
 
-Lint and TypeScript checks passed during the frontend revamp; see the dated [verification record](docs/PROJECT_CONTEXT.md#verification) for current results and known graph lint failures. No frontend automated test script is configured. For app changes, also inspect the affected behavior in the browser, and test Pencil/touch/audio changes on the actual iPad.
+Lint and TypeScript checks passed during the frontend revamp; see the dated [verification record](docs/PROJECT_CONTEXT.md#verification) for current results and known graph lint failures. Standalone regression scripts cover touch navigation and tutor board behavior. For app changes, also inspect the affected behavior in the browser, and test Pencil/touch/audio changes on the actual iPad.
 
 Backend health:
 

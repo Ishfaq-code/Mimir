@@ -23,18 +23,20 @@ class GeminiBoardTools(unittest.IsolatedAsyncioTestCase):
         self.session.userdata.paused = False
         self.session.agent_state = 'listening'
         self.session.interrupt = AsyncMock()
+        self.session.generate_reply.return_value.wait_for_playout = AsyncMock()
         p = patch.object(GeminiTutor, 'session', new_callable=PropertyMock, return_value=self.session)
         p.start()
         self.addCleanup(p.stop)
         self.annotation_result = {'success': True, 'scaffoldPlaced': True}
         self.annotations = []
+        self.preferences = {'oneStep': True, 'aiWrites': False}
 
         async def call(method, args):
             if method == 'get_board_status':
                 return {'available': True, 'ready': self.ready, 'revision': self.revision if self.ready else None,
-                        'preferences': {'oneStep': True}}
+                        'preferences': dict(self.preferences)}
             if method == 'get_canvas_state':
-                return {'question': self.question, 'preferences': {'oneStep': True}, 'tutorAnnotations': self.annotations}
+                return {'question': self.question, 'preferences': dict(self.preferences), 'tutorAnnotations': self.annotations}
             if method == 'set_tutor_status' and args['status'] == 'waiting':
                 self.waiting.set()
             if method == 'apply_teaching_plan':
@@ -197,7 +199,122 @@ class GeminiBoardTools(unittest.IsolatedAsyncioTestCase):
     async def test_unsolicited_write_tool_is_rejected(self):
         result = await self.tutor.write_step(self.context, 'r1', self.plan())
         self.assertEqual(result['error'], 'writing_not_requested')
-        self.canvas.call.assert_not_awaited()
+        self.assertFalse(any(c.args[0] == 'apply_teaching_plan' for c in self.canvas.call.await_args_list))
+
+    async def test_ai_mode_records_answer_even_through_review_tool(self):
+        self.preferences['aiWrites'] = True
+        plan = self.plan()
+        plan.speech = "That's right. What is two plus six?"
+        result = await self.tutor.review_step(self.context, 'r1', plan)
+        self.assertTrue(result['step_placed'])
+        self.assertEqual(result['speech'], plan.speech)
+        call = next(c for c in self.canvas.call.await_args_list if c.args[0] == 'apply_teaching_plan')
+        self.assertEqual(call.args[1]['completedStep'], '2+6')
+        self.assertIsNone(call.args[1]['scaffold'])
+        self.assertTrue(call.args[1]['aiWrites'])
+
+    async def test_ai_mode_fills_blank_on_a_spoken_answer(self):
+        self.preferences['aiWrites'] = True
+        self.annotations = [{'id': 'blank-1', 'problem': '2+3*2', 'template': '2+6={{blank}}'}]
+        plan = self.plan()
+        plan.student_answer = '8'
+        plan.checks = [Check(left='2+6', right='8', equal=True)]
+        result = await self.tutor.review_step(self.context, 'r1', plan)
+        self.assertTrue(result['step_placed'])
+        call = next(c for c in self.canvas.call.await_args_list if c.args[0] == 'apply_teaching_plan')
+        self.assertEqual(call.args[1]['replaceAnnotationId'], 'blank-1')
+        self.assertIn('finished', result['speech'])
+
+    async def test_ai_mode_draws_hint_and_does_not_ask_student_to_write(self):
+        self.preferences['aiWrites'] = True
+        plan = self.plan()
+        plan.status, plan.student_answer, plan.checks = 'hint', None, []
+        plan.speech = 'What is two plus six?'
+        result = await self.tutor.write_step(self.context, 'r1', plan)
+        self.assertTrue(result['scaffold_placed'])
+        self.assertEqual(result['speech'], plan.speech)
+
+    async def test_ai_mode_incorrect_answer_does_not_advance(self):
+        self.preferences['aiWrites'] = True
+        plan = self.plan()
+        plan.status, plan.student_answer, plan.scaffold = 'incorrect', '7', None
+        plan.checks = [Check(left='3*2', right='7', equal=False)]
+        plan.speech = 'Try that multiplication again.'
+        result = await self.tutor.review_step(self.context, 'r1', plan)
+        self.assertTrue(result['approved'])
+        self.assertFalse(result['step_placed'])
+
+    async def test_ai_mode_builds_missing_calculation_blank_without_retry(self):
+        self.preferences['aiWrites'] = True
+        plan = self.plan()
+        plan.status, plan.student_answer, plan.checks, plan.scaffold = 'hint', None, [], None
+        plan.focus_expression = '3*2'
+        result = await self.tutor.review_step(self.context, 'r1', plan)
+        self.assertTrue(result['step_placed'])
+        call = next(c for c in self.canvas.call.await_args_list if c.args[0] == 'apply_teaching_plan')
+        self.assertEqual(call.args[1]['scaffold'], '2+{{blank}}')
+
+    async def test_grounded_hint_mislabeled_conversation_still_writes(self):
+        self.preferences['aiWrites'] = True
+        plan = self.plan()
+        plan.problem = '5(2+3)'
+        plan.status, plan.student_answer, plan.checks, plan.scaffold = 'conversation', None, [], None
+        plan.focus_expression = '2+3'
+        result = await self.tutor.review_step(self.context, 'r1', plan)
+        self.assertTrue(result['step_placed'])
+        call = next(c for c in self.canvas.call.await_args_list if c.args[0] == 'apply_teaching_plan')
+        self.assertEqual(call.args[1]['scaffold'], '5*({{blank}})')
+        self.assertEqual(call.args[1]['problem'], '5*(2+3)')
+
+    async def test_ai_mode_restores_context_for_legacy_focused_blank(self):
+        self.preferences['aiWrites'] = True
+        self.annotations = [{'id': 'focus-1', 'problem': '2 + 3 * 2', 'template': '3*2={{blank}}'}]
+        result = await self.tutor.review_step(self.context, 'r1', self.plan())
+        self.assertTrue(result['step_placed'])
+        call = next(c for c in self.canvas.call.await_args_list if c.args[0] == 'apply_teaching_plan')
+        self.assertEqual(call.args[1]['completedStep'], '2+6')
+        self.assertIsNone(call.args[1]['replaceAnnotationId'])
+
+    async def test_switching_back_to_student_mode_stops_writing_on_same_board(self):
+        self.preferences['aiWrites'] = True
+        await self.inspect()
+        self.preferences['aiWrites'] = False
+        result = await self.tutor.review_step(self.context, 'r1', self.plan())
+        self.assertFalse(result['step_placed'])
+        self.assertIn('Write that answer', result['speech'])
+
+    async def test_mode_switch_during_tool_application_is_not_approved(self):
+        self.preferences['aiWrites'] = True
+        self.annotation_result = {'success': False, 'error': 'writing_mode_changed'}
+        result = await self.tutor.write_step(self.context, 'r1', self.plan())
+        self.assertFalse(result['approved'])
+        self.assertEqual(self.tutor._last_review_at, 0)
+
+    async def test_student_can_decline_writing_for_one_ai_mode_turn(self):
+        self.preferences['aiWrites'] = True
+        self.request_writing("Check this but don't write anything.")
+        result = await self.tutor.review_step(self.context, 'r1', self.plan())
+        self.assertFalse(result['step_placed'])
+
+    async def test_explicit_request_is_honored_by_review_in_student_mode(self):
+        self.request_writing('Could you go ahead and write that down?')
+        result = await self.tutor.review_step(self.context, 'r1', self.plan())
+        self.assertTrue(result['step_placed'])
+        self.assertFalse(self.tutor._writing_authorized)
+
+    async def test_typed_promise_without_tool_gets_one_followup(self):
+        self.tutor.submit('Please write a blank for me')
+        await self.tutor._queued_turn
+        self.assertEqual(self.session.generate_reply.call_count, 2)
+        self.assertIn('Pending request', self.session.generate_reply.call_args.kwargs['instructions'])
+
+    async def test_successful_typed_write_has_no_extra_model_turn(self):
+        async def complete():
+            await self.tutor.write_step(self.context, 'r1', self.plan())
+        self.session.generate_reply.return_value.wait_for_playout.side_effect = complete
+        self.tutor.submit('Please write a blank for me')
+        await self.tutor._queued_turn
+        self.session.generate_reply.assert_called_once()
 
     async def test_review_cannot_draw_even_if_model_supplies_a_scaffold(self):
         result = await self.tutor.review_step(self.context, 'r1', self.plan())

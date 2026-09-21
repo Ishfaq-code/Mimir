@@ -19,6 +19,8 @@ class WritingWait(unittest.IsolatedAsyncioTestCase):
         self.revision = 'r1'
         self.waiting = asyncio.Event()
         self.applied = []
+        self.applications = []
+        self.preferences = {'aiWrites': False}
         self.session = MagicMock()
         self.session.userdata.paused = False
         self.session.user_state = 'listening'
@@ -29,12 +31,13 @@ class WritingWait(unittest.IsolatedAsyncioTestCase):
 
         async def rpc(method, args):
             if method == 'get_board_status':
-                return {'ready': self.ready, 'revision': self.revision if self.ready else None, 'available': True}
+                return {'ready': self.ready, 'revision': self.revision if self.ready else None, 'available': True, 'preferences': self.preferences}
             if method == 'set_tutor_status' and args['status'] == 'waiting': self.waiting.set()
             if method == 'apply_teaching_plan':
                 self.applied.append(args['snapshotId'])
+                self.applications.append(args)
                 return {'success': args['snapshotId'] == self.revision,
-                        'error': 'stale_snapshot_look_again'}
+                        'error': 'stale_snapshot_look_again', 'stepPlaced': bool(args.get('completedStep') or args.get('scaffold'))}
             return {}
 
         async def capture():
@@ -136,6 +139,18 @@ class WritingWait(unittest.IsolatedAsyncioTestCase):
         plan = await planner.plan('six', {}, {'regions': [{'id': 'R1'}]}, b'image', [], None)
         self.assertIsNone(plan.scaffold)
         self.assertEqual(plan.speech, "That's right. Write that answer on your canvas.")
+
+    async def test_legacy_ai_mode_records_correct_spoken_answer(self):
+        self.ready = True
+        self.preferences['aiWrites'] = True
+        plan = self.plan('Correct.')
+        plan.status, plan.student_answer, plan.answer_source = 'correct', '4', 'spoken'
+        plan.checks = [Check(left='2+2', right='4', equal=True)]
+        self.tutor._planner.plan.return_value = plan
+        await self.tutor._respond('four', 1)
+        self.assertEqual(self.applications[-1]['completedStep'], '2+2=4')
+        self.assertTrue(self.applications[-1]['aiWrites'])
+        self.assertNotIn('Write', self.tutor._speak.call_args.args[0])
 
 
 if __name__ == '__main__': unittest.main()
