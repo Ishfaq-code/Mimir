@@ -56,13 +56,18 @@ export async function captureScene(elements: CanvasElement[], screenshot: Canvas
     if (!drawing) continue;
     ctx.save();
     ctx.translate((annotation.x - camera.x) * camera.zoom, (annotation.y - camera.y) * camera.zoom);
-    ctx.scale(camera.zoom, camera.zoom);
+    const handwritingScale = annotation.handwritingScale ?? 1;
+    ctx.scale(camera.zoom * handwritingScale, camera.zoom * handwritingScale);
     ctx.strokeStyle = dark ? "#a7d9bd" : "#28644c";
-    paintHandwriting(ctx, drawing);
+    paintHandwriting(ctx, drawing, annotation.handwritingStrokeWidth ? annotation.handwritingStrokeWidth / handwritingScale : undefined);
     ctx.restore();
   }
   const ink = connectedInk(elements);
-  const candidates: Omit<BoardRegion, "id">[] = ink.map(region => ({ ...region }));
+  const strokeWidths = new Map(elements.map(el => [el.id, el.style.strokeWidth]));
+  const candidates: Omit<BoardRegion, "id">[] = ink.map(region => {
+    const widths = region.strokeIds.map(id => strokeWidths.get(id) ?? 2).sort((a,b) => a-b);
+    return { ...region, strokeWidth: widths[Math.floor(widths.length / 2)] };
+  });
   for (const el of elements) {
     if (el.isDeleted || el.type !== "text") continue;
     ctx.font = `${el.fontSize}px sans-serif`;

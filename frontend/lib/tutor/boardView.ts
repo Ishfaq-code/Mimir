@@ -1,7 +1,7 @@
 import type { BoundingBox } from "./types";
 import { getPaused, getPreferences } from "./support";
 
-export interface BoardRegion { id: string; bounds: BoundingBox; text?: string; strokeIds?: string[] }
+export interface BoardRegion { id: string; bounds: BoundingBox; text?: string; strokeIds?: string[]; strokeWidth?: number }
 export interface BoardView {
   snapshotId: string;
   revision: string;

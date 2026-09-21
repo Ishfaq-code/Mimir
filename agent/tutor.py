@@ -5,7 +5,8 @@ from time import perf_counter
 
 from livekit.agents import Agent
 from prompts import TUTOR_INSTRUCTIONS
-from planner import Planner, speech_without_scaffold
+from planner import Planner, finalize_plan, speech_without_scaffold
+from writing_policy import requests_writing
 from tools.canvas import CanvasRpc
 from preparation import BoardPreparation
 from fast_turn import is_hint_request, fast_answer, numeric_answer, anticipated_confirmation
@@ -244,6 +245,9 @@ class MathTutor(Agent):
             if preparation:preparation.invalidate()
             self._failure_stage = 'math'
             plan = await self._planner.plan(text, state, view, image, self._history, self._active)
+        # Cached hints and local numeric-answer plans obey the same writing
+        # policy as live planning. A correct answer is not a request for AI ink.
+        plan = finalize_plan(plan.model_copy(deep=True), view, allow_writing=requests_writing(text))
         checked = perf_counter()
         if epoch != self._epoch or self.session.userdata.paused: return True
         if self.session.user_state == 'speaking': return True

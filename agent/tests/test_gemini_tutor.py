@@ -27,13 +27,14 @@ class GeminiBoardTools(unittest.IsolatedAsyncioTestCase):
         p.start()
         self.addCleanup(p.stop)
         self.annotation_result = {'success': True, 'scaffoldPlaced': True}
+        self.annotations = []
 
         async def call(method, args):
             if method == 'get_board_status':
                 return {'available': True, 'ready': self.ready, 'revision': self.revision if self.ready else None,
                         'preferences': {'oneStep': True}}
             if method == 'get_canvas_state':
-                return {'question': self.question, 'preferences': {'oneStep': True}, 'tutorAnnotations': []}
+                return {'question': self.question, 'preferences': {'oneStep': True}, 'tutorAnnotations': self.annotations}
             if method == 'set_tutor_status' and args['status'] == 'waiting':
                 self.waiting.set()
             if method == 'apply_teaching_plan':
@@ -58,6 +59,12 @@ class GeminiBoardTools(unittest.IsolatedAsyncioTestCase):
 
     async def inspect(self):
         return await self.tutor.inspect_board(self.context)
+
+    def request_writing(self, text='Please write this step for me'):
+        # Exercise the real user-input path, including cancellation and the
+        # permission gate, without starting a separate generated response.
+        with patch.object(self.tutor, '_submit_after_pen', new_callable=AsyncMock):
+            self.tutor.submit(text)
 
     async def test_waits_for_pen_before_sending_any_image(self):
         self.ready = False
@@ -90,12 +97,148 @@ class GeminiBoardTools(unittest.IsolatedAsyncioTestCase):
         self.session.generate_reply.assert_called_once()
         self.assertIn('Complete the pending student request', self.session.generate_reply.call_args.kwargs['instructions'])
 
-    async def test_voice_turn_already_inspected_is_not_replayed(self):
+    async def test_voice_turn_already_reviewed_is_not_replayed(self):
         self.tutor.on_voice_transcript('Check my work', False)
-        await self.inspect()
+        await self.tutor.review_step(self.context, 'r1', self.plan())
         self.tutor.on_voice_transcript('Check my work', True)
         self.assertIsNone(self.tutor._queued_turn)
         self.session.generate_reply.assert_not_called()
+
+    async def test_inspection_without_review_still_completes_voice_request(self):
+        self.tutor.on_voice_transcript('Write a blank', False)
+        await self.inspect()
+        self.tutor.on_voice_transcript('Write a blank', True)
+        await self.tutor._queued_turn
+        self.assertIn('write_step', self.session.generate_reply.call_args.kwargs['instructions'])
+
+    async def test_short_spoken_answer_followup_is_not_lost(self):
+        await self.tutor.review_step(self.context, 'r1', self.plan())
+        self.tutor.on_voice_transcript('eight', False)
+        self.tutor.on_voice_transcript('eight', True)
+        await self.tutor._queued_turn
+        self.session.generate_reply.assert_called_once()
+
+    async def test_correct_spoken_answer_guides_student_without_writing(self):
+        plan = self.plan()
+        plan.scaffold = None
+        plan.answer_source = 'spoken'
+        result = await self.tutor.review_step(self.context, 'r1', plan)
+        self.assertFalse(result['step_placed'])
+        self.assertIn('Write that answer on your canvas', result['speech'])
+        call = next(c for c in self.canvas.call.await_args_list if c.args[0] == 'apply_teaching_plan')
+        self.assertIsNone(call.args[1]['completedStep'])
+        self.assertIsNone(call.args[1]['scaffold'])
+
+    async def test_final_spoken_answer_is_recorded(self):
+        self.request_writing()
+        plan = self.plan()
+        plan.student_answer = '8'
+        plan.answer_source = 'spoken'
+        plan.checks = [Check(left='2+6', right='8', equal=True)]
+        result = await self.tutor.write_step(self.context, 'r1', plan)
+        self.assertTrue(result['step_placed'])
+        self.assertFalse(result['scaffold_placed'])
+        call = next(c for c in self.canvas.call.await_args_list if c.args[0] == 'apply_teaching_plan')
+        self.assertEqual(call.args[1]['completedStep'], '2+6=8')
+        self.assertIsNone(call.args[1]['scaffold'])
+
+    async def test_existing_blank_is_completed_in_place(self):
+        self.request_writing('Can you fill in the blank for me?')
+        self.annotations = [{'id': 'blank-1', 'problem': '2+3*2', 'template': '2+6={{blank}}'}]
+        plan = self.plan()
+        plan.student_answer = '8'
+        plan.answer_source = 'spoken'
+        plan.checks = [Check(left='2+6', right='8', equal=True)]
+        await self.tutor.write_step(self.context, 'r1', plan)
+        call = next(c for c in self.canvas.call.await_args_list if c.args[0] == 'apply_teaching_plan')
+        self.assertEqual(call.args[1]['replaceAnnotationId'], 'blank-1')
+        self.assertEqual(call.args[1]['completedStep'], '2+6=8')
+
+    async def test_written_final_answer_does_not_get_copied(self):
+        plan = self.plan()
+        plan.student_answer = '8'
+        plan.answer_source = 'written'
+        plan.checks = [Check(left='2+6', right='8', equal=True)]
+        await self.tutor.review_step(self.context, 'r1', plan)
+        call = next(c for c in self.canvas.call.await_args_list if c.args[0] == 'apply_teaching_plan')
+        self.assertIsNone(call.args[1]['completedStep'])
+        self.assertIsNone(call.args[1]['scaffold'])
+
+    async def test_explicit_writing_cannot_succeed_without_a_step(self):
+        self.request_writing()
+        plan = self.plan()
+        plan.status = 'hint'
+        plan.student_answer = None
+        plan.scaffold = None
+        plan.checks = []
+        result = await self.tutor.write_step(self.context, 'r1', plan)
+        self.assertFalse(result['approved'])
+        self.assertFalse(any(c.args[0] == 'apply_teaching_plan' for c in self.canvas.call.await_args_list))
+
+    async def test_unrelated_correct_math_cannot_be_recorded(self):
+        self.request_writing()
+        plan = self.plan()
+        plan.scaffold = None
+        plan.student_answer = '9'
+        plan.checks = [Check(left='3*3', right='9', equal=True)]
+        result = await self.tutor.write_step(self.context, 'r1', plan)
+        self.assertFalse(result['approved'])
+
+    async def test_failed_completed_step_does_not_claim_to_have_written(self):
+        self.request_writing()
+        self.annotation_result = {'success': False, 'error': 'blank_contains_student_ink'}
+        plan = self.plan()
+        plan.scaffold = None
+        result = await self.tutor.write_step(self.context, 'r1', plan)
+        self.assertTrue(result['approved'])
+        self.assertFalse(result['step_placed'])
+        self.assertIn("couldn't place", result['speech'])
+
+    async def test_unsolicited_write_tool_is_rejected(self):
+        result = await self.tutor.write_step(self.context, 'r1', self.plan())
+        self.assertEqual(result['error'], 'writing_not_requested')
+        self.canvas.call.assert_not_awaited()
+
+    async def test_review_cannot_draw_even_if_model_supplies_a_scaffold(self):
+        result = await self.tutor.review_step(self.context, 'r1', self.plan())
+        self.assertFalse(result['step_placed'])
+        call = next(c for c in self.canvas.call.await_args_list if c.args[0] == 'apply_teaching_plan')
+        self.assertIsNone(call.args[1]['scaffold'])
+        self.assertIsNone(call.args[1]['completedStep'])
+        self.assertNotIn('blank below', result['speech'])
+
+    async def test_answer_does_not_automatically_fill_existing_blank(self):
+        self.annotations = [{'id': 'blank-1', 'problem': '2+3*2', 'template': '2+6={{blank}}'}]
+        plan = self.plan()
+        plan.student_answer = '8'
+        plan.answer_source = 'spoken'
+        plan.checks = [Check(left='2+6', right='8', equal=True)]
+        result = await self.tutor.review_step(self.context, 'r1', plan)
+        self.assertFalse(result['step_placed'])
+        call = next(c for c in self.canvas.call.await_args_list if c.args[0] == 'apply_teaching_plan')
+        self.assertIsNone(call.args[1]['replaceAnnotationId'])
+        self.assertIsNone(call.args[1]['completedStep'])
+
+    async def test_writing_permission_is_consumed_by_one_step(self):
+        self.request_writing()
+        self.assertTrue((await self.tutor.write_step(self.context, 'r1', self.plan()))['step_placed'])
+        again = await self.tutor.write_step(self.context, 'r1', self.plan())
+        self.assertEqual(again['error'], 'writing_not_requested')
+
+    async def test_new_answer_revokes_previous_writing_request(self):
+        self.request_writing()
+        self.request_writing('six')
+        result = await self.tutor.write_step(self.context, 'r1', self.plan())
+        self.assertEqual(result['error'], 'writing_not_requested')
+
+    async def test_final_voice_request_authorizes_only_requested_writing(self):
+        self.tutor.on_voice_transcript('Can you write that down?', False)
+        self.assertFalse(self.tutor._writing_authorized)
+        self.tutor.on_voice_transcript('Can you write that down?', True)
+        self.assertTrue(self.tutor._writing_authorized)
+        self.tutor.cancel_turn()
+        await asyncio.gather(self.tutor._queued_turn, return_exceptions=True)
+        self.assertFalse(self.tutor._writing_authorized)
 
     async def test_new_request_cancels_queued_review(self):
         self.ready = False
@@ -171,8 +314,9 @@ class GeminiBoardTools(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('see', result['speech'])
 
     async def test_success_preserves_svg_template_and_missing_value_speech(self):
+        self.request_writing()
         await self.inspect()
-        result = await self.tutor.review_step(self.context, 'r1', self.plan())
+        result = await self.tutor.write_step(self.context, 'r1', self.plan())
         self.assertTrue(result['approved'])
         self.assertEqual(result['speech'], "That's right. Write the missing value in the blank below.")
         call = next(c for c in self.canvas.call.await_args_list if c.args[0] == 'apply_teaching_plan')

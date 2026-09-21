@@ -62,6 +62,12 @@ async def entrypoint(ctx: agents.JobContext):
         tutor = MathTutor(participant.identity)
     logger.info('Tutor voice provider: %s', config.TUTOR_PROVIDER)
 
+    @session.on("close")
+    def on_session_closed(event):
+        # A failed model session must leave the room. Otherwise the browser
+        # still sees an agent and can stay on "Speaking" indefinitely.
+        ctx.shutdown(reason="tutor session closed")
+
     @session.on("agent_state_changed")
     def on_agent_state(event):
         if event.new_state == "speaking":

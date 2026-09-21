@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 import config
 from math_check import equivalent, valid_scaffold
+from writing_policy import requests_writing
 
 logger = logging.getLogger('mimir-tutor')
 
@@ -24,6 +25,7 @@ class TeachingPlan(BaseModel):
     status: Literal['hint', 'correct', 'incorrect', 'clarify', 'read', 'conversation']
     problem: str
     student_answer: str | None = Field(default=None, description='Only an answer actually given by the student in speech, text, or visible work. Use null for an unanswered hint/drawing request. Never copy scaffold.answer or your calculated answer here.')
+    answer_source: Literal['spoken', 'written'] | None = Field(default=None, description='spoken for an answer given in conversation but not yet on the board; written only when the current image shows the student already wrote it. Null for no student answer.')
     problem_region_ids: list[str] = Field(description='Current IDs for the original question AND its related student work below. Include EVERY highlight_region_id. This is the whole working column, not only the printed question.')
     highlight_region_ids: list[str] = Field(description='ALL regions of the complete subexpression being discussed: both operands AND the operator, never just the operator. Use [] only for no visual target.')
     highlight_label: str
@@ -73,9 +75,11 @@ a scaffold, say something like "Write the total in the blank." Do not read its t
 Ask one small question, then wait. Be conversational, specific, and brief (usually <=35 words).
 For 2+3*2, guide multiplication first; don't evaluate left to right. For 2(x+3), distribute to BOTH terms.
 For a wrong answer, gently point to the specific error; don't praise it or advance to a new step.
-When the student answers correctly, acknowledge it and offer ONE next equation with {{blank}}
-for the STUDENT to fill by hand. The blank must be a NEW small calculation, not the answer they
-just gave. E.g. after '6' for 3*2 in 2+3*2, scaffold '2 + 6 = {{blank}}', ask them to write the total.
+Writing is student-led by default. After a correct answer, guide the student to write their
+own next line. Set scaffold=null unless the CURRENT student message explicitly asks YOU to
+write/draw a step or blank. A spoken answer, hint request, "show me how" or unfinished work
+is not permission to write. Never automatically fill a tutor blank when the student answers.
+When explicitly asked to write, offer ONE next equation with {{blank}} for the student to fill.
 If the final answer is already correct, no scaffold; briefly confirm completion. NEVER invent
 a new practice question unless the student explicitly requests another question.
 If a scaffold is already on the board and unfinished, stay with it; do not duplicate or skip it.
@@ -83,7 +87,7 @@ If asking the student to fill a NEW blank, include its scaffold object in this r
 Never just describe a new blank in speech while scaffold is null.
 Students may answer aloud; use the prior question to interpret short answers like 'six'.
 Do not demand more written work before accepting an unambiguous spoken answer.
-If explicitly asked for a demonstration, show just one step, still leaving one useful blank.
+An explanation/demonstration is spoken unless the student explicitly asks you to write it.
 When writing a scaffold, speech asks them to fill the blank. The app may decline placement;
 do not claim 'I wrote/highlighted' or refer to colors; refer to the expression by name instead.
 Read requests: read only, no solving/checks/scaffold/highlight needed.
@@ -103,7 +107,7 @@ For a spoken correct '6' to 3*2, check left='3*2',right='6',equal=true.
 For algebra steps compare BOTH equations: '2*(x+3)=14' vs '2*x+3=14' equal=false.
 Only one variable and basic +,-,*,/,^ are independently checkable. Unsupported math: explain
 conceptually or ask to narrow the step; don't certify an answer or generate unsupported scaffolds.
-scaffold is null unless advancing a correct answer or an explicitly requested worked example.
+scaffold is null unless the student explicitly requested AI writing in this message.
 scaffold.template uses exactly one {{blank}}, plain math and explicit *; answer fills ONLY the blank.
 For template '2+6={{blank}}', answer is '8', never '2+6=8'.
 Filled template MUST be equivalent to the ORIGINAL problem field. Do not
@@ -165,11 +169,12 @@ def validate_plan(plan: TeachingPlan, view: dict) -> None:
     if plan.status in ('clarify', 'conversation', 'read') and (plan.scaffold or plan.highlight_region_ids):
         raise ValueError('Ambiguous turn cannot annotate')
 
-def finalize_plan(plan: TeachingPlan, view: dict) -> TeachingPlan:
+def finalize_plan(plan: TeachingPlan, view: dict, *, allow_writing: bool = True) -> TeachingPlan:
     """Shared deterministic checks for both checked OpenAI and native Gemini turns."""
     if plan.problem.strip().endswith('='):
         plan.problem = plan.problem.strip()[:-1].strip()
-    proposed_scaffold = plan.scaffold
+    proposed_scaffold = plan.scaffold if allow_writing else None
+    omitted_scaffold = plan.scaffold is not None and not allow_writing
     plan.scaffold = None
     validate_plan(plan, view)
     if finished_problem(plan):
@@ -181,6 +186,12 @@ def finalize_plan(plan: TeachingPlan, view: dict) -> TeachingPlan:
         plan.speech = ("That's right. " if plan.status == 'correct' else "Try this next step. ") + "Write the missing value in the blank below."
     else:
         plan.speech = plan.speech.replace('{{blank}}', 'the blank')
+    if not allow_writing:
+        if plan.status == 'correct' and plan.answer_source != 'written':
+            plan.speech = "That's right. Write that answer on your canvas."
+        elif omitted_scaffold and not finished_problem(plan):
+            plan.speech = ("That's right. What would you write next?" if plan.status == 'correct'
+                           else "Let's work through it. What would you write as the next step?")
     return plan
 
 
@@ -219,7 +230,7 @@ class Planner:
                     usage.output_tokens if usage else None,
                     usage.output_tokens_details.reasoning_tokens if usage else None)
         if not response.output_parsed: raise ValueError('No readable teaching plan')
-        return finalize_plan(response.output_parsed, view)
+        return finalize_plan(response.output_parsed, view, allow_writing=requests_writing(text))
 
     async def close(self):
         await self.client.close()

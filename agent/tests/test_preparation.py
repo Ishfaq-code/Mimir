@@ -92,6 +92,9 @@ class Cache(unittest.IsolatedAsyncioTestCase):
             await tutor._respond('4',1)
         self.planner.plan.assert_awaited_once();self.canvas.capture.assert_awaited_once()
         self.assertEqual(tutor._speak.await_count,2)
+        applications = [c.args[1] for c in self.canvas.call.await_args_list if c.args[0] == 'apply_teaching_plan']
+        self.assertTrue(all(a['scaffold'] is None for a in applications))
+        self.assertIn('Write that answer on your canvas', tutor._speak.await_args_list[-1].args[0])
         await self.cache.close()
 
 if __name__=='__main__':unittest.main()

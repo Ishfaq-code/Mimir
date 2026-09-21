@@ -126,8 +126,8 @@ export function layoutHandwriting(template: string): Handwriting | null {
 }
 
 /** Use the same paths in the tutor's snapshot as on the visible SVG layer. */
-export function paintHandwriting(ctx: CanvasRenderingContext2D, drawing: Handwriting) {
-  ctx.lineWidth = 2.1; ctx.lineCap = "round"; ctx.lineJoin = "round";
+export function paintHandwriting(ctx: CanvasRenderingContext2D, drawing: Handwriting, strokeWidth = 2.1) {
+  ctx.lineWidth = strokeWidth; ctx.lineCap = "round"; ctx.lineJoin = "round";
   for (const path of drawing.paths) {
     ctx.save(); ctx.translate(path.x, path.y); ctx.scale(path.scale, path.scale);
     ctx.stroke(new Path2D(path.d)); ctx.restore();

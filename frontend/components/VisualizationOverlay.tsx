@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { Camera } from "@/lib/canvas/types";
 import Icon from "./Icon";
 import VisualizationResult, { type VisualizationData } from "./VisualizationResult";
@@ -33,7 +33,7 @@ export default function VisualizationOverlay({ embed, camera, onClose, onMove, o
     return () => cancelAnimationFrame(frame);
   }, []);
 
-  const handleDragStart = useCallback((event: PointerEvent<HTMLDivElement>) => {
+  const handleDragStart = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
     const el = event.currentTarget;
@@ -53,7 +53,7 @@ export default function VisualizationOverlay({ embed, camera, onClose, onMove, o
     el.addEventListener("pointerup", onPointerUp);
   }, [embed.id, embed.x, embed.y, camera.zoom, onMove]);
 
-  const handleResizeStart = useCallback((event: PointerEvent<HTMLDivElement>) => {
+  const handleResizeStart = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
     const el = event.currentTarget;

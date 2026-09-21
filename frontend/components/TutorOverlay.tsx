@@ -54,7 +54,7 @@ export default function TutorOverlay({ camera }: { camera: Camera }) {
       {annotations.map((a) => {
         const drawing = a.template ? layoutHandwriting(a.template) : null;
         return <div key={a.id} className="tutor-scaffold" style={{ ...place(a.x, a.y), color: TUTOR_COLOR }}>
-          {drawing ? <HandwrittenStep drawing={drawing} createdAt={a.createdAt} calm={preferences.calm}/> : <Katex latex={a.latex} color={TUTOR_COLOR} />}
+          {drawing ? <HandwrittenStep key={a.createdAt} drawing={drawing} createdAt={a.createdAt} calm={preferences.calm} scale={a.handwritingScale} strokeWidth={a.handwritingStrokeWidth}/> : <Katex latex={a.latex} color={TUTOR_COLOR} />}
           <button className="tutor-scaffold-dismiss" aria-label="Remove tutor step" onClick={() => removeTutorAnnotation(a.id)}>×</button>
         </div>;
       })}

@@ -26,6 +26,11 @@ export interface TutorLatexAnnotation {
   createdAt: number;
   latex: string;
   template?: string;
+  handwritingScale?: number;
+  handwritingStrokeWidth?: number;
+  problem?: string;
+  sourceStrokeIds?: string[];
+  sourceBounds?: BoundingBox;
   width?: number;
   height?: number;
   x: number;

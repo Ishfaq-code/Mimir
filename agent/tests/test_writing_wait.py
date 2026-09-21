@@ -38,7 +38,7 @@ class WritingWait(unittest.IsolatedAsyncioTestCase):
             return {}
 
         async def capture():
-            return {'snapshotId': self.revision, 'revision': self.revision}, b'image'
+            return {'snapshotId': self.revision, 'revision': self.revision, 'regions': [{'id': 'R1'}]}, b'image'
 
         self.tutor._canvas.call = AsyncMock(side_effect=rpc)
         self.tutor._canvas.capture = AsyncMock(side_effect=capture)
@@ -82,7 +82,7 @@ class WritingWait(unittest.IsolatedAsyncioTestCase):
                 self.ready = False
                 self.revision = 'r2'
                 raise RuntimeError('pen moved during image encoding')
-            return {'snapshotId': self.revision, 'revision': self.revision}, b'new ink'
+            return {'snapshotId': self.revision, 'revision': self.revision, 'regions': [{'id': 'R1'}]}, b'new ink'
         self.tutor._canvas.capture.side_effect = capture
         task = asyncio.create_task(self.tutor._respond('check my work', 1))
         await asyncio.wait_for(self.waiting.wait(), 1)
@@ -119,9 +119,23 @@ class WritingWait(unittest.IsolatedAsyncioTestCase):
             speech='Now write 2 + 6 = in the blank.', checks=[Check(left='3*2', right='6', equal=True)],
             scaffold=Scaffold(template='2+6={{blank}}', answer='8'))
         planner.client.responses.parse = AsyncMock(return_value=response)
-        plan = await planner.plan('six', {}, {'regions':[{'id':'R1'}]}, b'image', [], None)
+        plan = await planner.plan('Please write the next step for me', {}, {'regions':[{'id':'R1'}]}, b'image', [], None)
         self.assertIsNotNone(plan.scaffold)
         self.assertEqual(plan.speech, "That's right. Write the missing value in the blank below.")
+
+    async def test_legacy_planner_removes_unrequested_writing(self):
+        planner = object.__new__(Planner)
+        planner.client = MagicMock()
+        response = MagicMock()
+        response.usage = None
+        response.output_parsed = TeachingPlan(status='correct', problem='2+3*2', student_answer='6',
+            answer_source='spoken', problem_region_ids=['R1'], highlight_region_ids=[], highlight_label='',
+            speech='I wrote the next step below.', checks=[Check(left='3*2', right='6', equal=True)],
+            scaffold=Scaffold(template='2+6={{blank}}', answer='8'))
+        planner.client.responses.parse = AsyncMock(return_value=response)
+        plan = await planner.plan('six', {}, {'regions': [{'id': 'R1'}]}, b'image', [], None)
+        self.assertIsNone(plan.scaffold)
+        self.assertEqual(plan.speech, "That's right. Write that answer on your canvas.")
 
 
 if __name__ == '__main__': unittest.main()

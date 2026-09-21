@@ -99,6 +99,8 @@ The backend and worker must use the same `LIVEKIT_AGENT_NAME` (default `mimir-tu
 
 You can ask Mimir to check while still writing. The request waits until the pen has been up for one second; more writing resets that pause. Changes during checking trigger a fresh snapshot automatically. Stop, Pause, a new question, or ending the conversation cancels the pending check. Tutor steps animate as handwritten SVG strokes below the working column, avoiding existing content. Calm motion skips the drawing animation. Pen inactivity is a timing signal, not proof that a solution is complete.
 
+Mimir guides students to write their own steps by default. The `review_step` tool never adds or fills an equation. Only an explicit request such as “Write that down for me” authorizes `write_step`, which verifies and writes one step in one call. Spoken answers and requests for help do not authorize writing, and permission does not carry over to later answers. Requested writing can add a next-step blank, record a checked answer, or fill an existing tutor blank in place. It follows the latest selected ink's size, pen width and left alignment; repeated requests reuse the same step. Original student strokes stay untouched, and a blank containing new student ink cannot be replaced.
+
 ## OCR assets
 
 `npm run dev` and `npm run build` copy the installed OCR worker, WASM cores, and English data into `frontend/public/ocr/`. These generated files are ignored by Git and ESLint. The browser loads them from the app itself. Docker copies the generated assets into the production image. No CDN request is needed at runtime.

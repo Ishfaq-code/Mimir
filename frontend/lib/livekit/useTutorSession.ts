@@ -122,6 +122,11 @@ export function useTutorSession() {
           }
         });
         room.on(RoomEvent.ParticipantConnected, watchAgent);
+        room.on(RoomEvent.ParticipantDisconnected, participant => {
+          if (!active() || !established || !participant.isAgent) return;
+          void disconnect();
+          setError("Mimir disconnected. Your work is still here. Tap to reconnect."); setStatus("error");
+        });
         await room.connect(url, token);
         if (!active()) { await room.disconnect(); throw new DOMException("Connection cancelled", "AbortError"); }
         registerCanvasRpcs(room, tutorCanvas);

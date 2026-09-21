@@ -145,7 +145,7 @@ class TurnGate(unittest.IsolatedAsyncioTestCase):
         tutor._epoch=1;tutor._canvas=MagicMock();tutor._planner=MagicMock();tutor._history=[];tutor._active=None
         async def rpc(name,args):return {'success':False,'error':'invalid_scaffold'} if name=='apply_teaching_plan' else {'ready':True,'revision':'r1'}
         tutor._canvas.call=AsyncMock(side_effect=rpc)
-        tutor._canvas.capture=AsyncMock(return_value=({'snapshotId':'v1','revision':'r1'},b'image'))
+        tutor._canvas.capture=AsyncMock(return_value=({'snapshotId':'v1','revision':'r1','regions':[{'id':'R1'}]},b'image'))
         p=TeachingPlan(status='hint',problem='x',problem_region_ids=['R1'],highlight_region_ids=[],highlight_label='',speech='Which operation would you try first?',checks=[],scaffold=None)
         tutor._planner.plan=AsyncMock(return_value=p);tutor._speak=AsyncMock()
         session=MagicMock();session.userdata.paused=False

@@ -63,7 +63,9 @@ export function setRecognitionStatus(status: RecognitionStatus): void {
 }
 
 export function addTutorAnnotation(annotation: TutorAnnotation): void {
-  tutorAnnotations = [...tutorAnnotations, annotation];
+  tutorAnnotations = tutorAnnotations.some(item => item.id === annotation.id)
+    ? tutorAnnotations.map(item => item.id === annotation.id ? annotation : item)
+    : [...tutorAnnotations, annotation];
   revision += 1;
   emit();
 }

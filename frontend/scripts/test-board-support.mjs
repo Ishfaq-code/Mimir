@@ -92,7 +92,7 @@ try {
   const belowWork=teaching.scaffoldPosition(world,problem,250,74,[{x:100,y:320,width:180,height:55},{x:850,y:650,width:150,height:60}]);
   assert.equal(belowWork.x,100,'Stay aligned to the working column');
   assert.ok(belowWork.y>375 && belowWork.y<650,'Follow the student work, not another column');
-  assert.equal(teaching.scaffoldPosition(world,problem,2000,74,[]),null,'Do not squeeze illegible steps into the viewport');
+  assert.equal(teaching.scaffoldPosition(world,problem,2000,74,[]).x,100,'Wide steps stay full size in their working column on the infinite canvas');
   const handwriting=require(join(temp,'tutor/handwriting.js'));
   for(const expression of ['5 * 4 = {{blank}}','2*x + {{blank}} = 14','1/2 + 1/3 = {{blank}}','x^(2+1) = {{blank}}','X + x = {{blank}}']) {
     const drawing=handwriting.layoutHandwriting(expression);
@@ -106,6 +106,41 @@ try {
   assert.equal(handwriting.layoutHandwriting('x^('),null);
   assert.equal(handwriting.layoutHandwriting('<script>'),null);
   assert.equal(teaching.applyTeachingPlan({snapshotId:'old',problemRegionIds:['R1'],regionIds:[],label:'',scaffold:null}).success,false);
+  const store = require(join(temp,'tutor/store.js'));
+  view.world=world;
+  view.regions=[
+    {id:'R1',bounds:{x:110,y:120,width:40,height:120},strokeIds:['question']},
+    {id:'R2',bounds:{x:150,y:310,width:40,height:60},strokeIds:['working-1'],strokeWidth:2},
+    {id:'R3',bounds:{x:230,y:310,width:40,height:60},strokeIds:['working-2'],strokeWidth:2},
+  ];
+  assert.deepEqual(teaching.handwritingStyle(view.regions),{scale:2,x:150,strokeWidth:2},'Use the latest handwriting line, not a larger question above');
+  await board.captureBoard();
+  const write={snapshotId:'test',problemRegionIds:['R1','R2','R3'],regionIds:[],label:'',problem:'2+3*2',scaffold:'2+6={{blank}}'};
+  const written=teaching.applyTeachingPlan(write);
+  assert.equal(written.stepPlaced,true);
+  const annotation=store.getTutorAnnotations()[0];
+  assert.equal(annotation.handwritingScale,2);
+  assert.equal(annotation.handwritingStrokeWidth,2,'Match pen thickness without making large writing artificially bold');
+  assert.equal(annotation.x,150);
+  assert.equal(annotation.width,handwriting.layoutHandwriting(write.scaffold).width*2);
+  assert.equal(teaching.applyTeachingPlan(write).reused,true);
+  assert.equal(store.getTutorAnnotations().length,1,'Repeated tool calls reuse the existing step');
+  const fill={...write,scaffold:null,completedStep:'2+6=8',replaceAnnotationId:annotation.id};
+  assert.equal(teaching.applyTeachingPlan(fill).stepPlaced,true);
+  const filled=store.getTutorAnnotations()[0];
+  assert.equal(store.getTutorAnnotations().length,1);
+  assert.equal(filled.template,'2+6=8');
+  assert.equal(filled.id,annotation.id);
+  assert.equal(filled.x,annotation.x);
+  assert.equal(filled.y,annotation.y);
+  assert.equal(filled.handwritingScale,2,'Filling a tutor blank preserves size and position');
+  store.clearTutorAnnotations();
+  const fresh=teaching.applyTeachingPlan(write);
+  const freshAnnotation=store.getTutorAnnotations()[0];
+  view.regions.push({id:'student-answer',strokeIds:['answer'],bounds:{x:freshAnnotation.x+10,y:freshAnnotation.y+10,width:20,height:30}});
+  assert.equal(teaching.applyTeachingPlan({...fill,replaceAnnotationId:fresh.annotationId}).error,'blank_contains_student_ink');
+  assert.equal(store.getTutorAnnotations()[0].template,write.scaffold,'Never overwrite a blank the student is filling');
+  store.clearTutorAnnotations();
   detach(); assert.equal(board.getHighlight(),null);
   console.log('Passed: world coordinates, invalid regions, stale images, pause, preferences, ink snapping, focus invalidation, scaffold placement and cleanup.');
 } finally {rmSync(temp,{recursive:true,force:true});}
