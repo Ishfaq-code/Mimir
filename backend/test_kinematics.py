@@ -127,7 +127,9 @@ class KinematicsTests(unittest.TestCase):
                             self.assertNotIn("velocity", objects)
                         if kind == "free_fall":
                             self.assertNotIn("truck", objects)
-                            self.assertEqual(objects["ball"].type, "circle")
+                            self.assertEqual(objects["ball"].type, "baseball")
+                        else:
+                            self.assertEqual(objects["truck"].type, "truck")
                         for obj in objects.values():
                             for coordinate in (obj.x, obj.x2):
                                 if coordinate is not None:

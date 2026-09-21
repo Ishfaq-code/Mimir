@@ -122,7 +122,7 @@ class VisualizationPoint(BaseModel):
 
 class VisualizationObject(BaseModel):
     id: str = Field(min_length=1, max_length=24)
-    type: Literal["circle", "rect", "line", "arrow", "path", "text"]
+    type: Literal["circle", "rect", "truck", "baseball", "line", "arrow", "path", "text"]
     x: float = 0
     y: float = 0
     x2: float | None = None
@@ -451,7 +451,7 @@ def build_visualization(extraction: PhysicsExtraction) -> VisualizationResponse:
             ball_y = 70 + position / displacement * 290
             objects = [
                 VisualizationObject(id="ground", type="line", x=240, y=374, x2=550, y2=374, color="#8a938d"),
-                VisualizationObject(id="ball", type="circle", x=360, y=ball_y, radius=14, color="#2f9e44", label=extraction.object_label),
+                VisualizationObject(id="ball", type="baseball", x=360, y=ball_y, radius=15, color="#f8f5ed", label=extraction.object_label),
                 VisualizationObject(id="acceleration", type="arrow", x=480, y=ball_y, x2=480, y2=ball_y + 45, color="#e8590c", label="a"),
             ]
             if velocity > 1e-9:
@@ -459,7 +459,7 @@ def build_visualization(extraction: PhysicsExtraction) -> VisualizationResponse:
         else:
             objects = [
                 VisualizationObject(id="ground", type="line", x=70, y=320, x2=760, y2=320, color="#8a938d"),
-                VisualizationObject(id="truck", type="rect", x=truck_x, y=270, width=76, height=42, color="#2f9e44", label=extraction.object_label),
+                VisualizationObject(id="truck", type="truck", x=truck_x, y=264, width=84, height=48, color="#2f9e44", label=extraction.object_label),
             ]
             if velocity > 1e-9:
                 objects.append(VisualizationObject(id="velocity", type="arrow", x=arrow_start, y=250, x2=arrow_start + arrow_length, y2=250, color="#1971c2", label="v"))
