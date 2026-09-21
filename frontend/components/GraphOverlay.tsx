@@ -261,7 +261,7 @@ export default function GraphOverlay({
   const width = graph.w * camera.zoom;
   const height = graph.h * camera.zoom;
 
-  const sliderBarHeight = sliderVars.length > 0 ? 40 : 0;
+  const sliderBarHeight = sliderVars.length > 0 ? 48 : 0;
   const headerHeight = 34;
   const canvasH = Math.max(40, height - headerHeight - sliderBarHeight);
 

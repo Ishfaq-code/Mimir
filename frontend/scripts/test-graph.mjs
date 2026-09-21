@@ -19,14 +19,16 @@ try {
     ["y = A\\sin(Bx+C)+D", "A*sin(B*x+C)+D", ["A", "B", "C", "D"]],
     ["y = \\frac{x+1}{x-2}", "((x+1)/(x-2))", []],
     ["y = \\log(x)", "log(x)", []],
-    ["y = lnx", "ln(x)", []],
-    ["y = \\ln x", "ln(x)", []],
+    ["y = lnx", "log(x)", []],
+    ["y = \\ln x", "log(x)", []],
     ["y = sin^2x", "(sin(x))^(2)", []],
     ["y = sin^2(x)", "(sin(x))^(2)", []],
     ["y = sin^{2}x", "(sin(x))^(2)", []],
     ["y = A sin^2(Bx)", "A*(sin(B*x))^(2)", ["A", "B"]],
     ["y = \\sqrt{x}", "sqrt(x)", []],
     ["y = |x-1|", "abs(x-1)", []],
+    ["y = 5!", "factorial(5)", []],
+    ["y = x!", "factorial(x)", []],
   ];
 
   for (const [latex, expected, variables] of cases) {
@@ -50,6 +52,25 @@ try {
   const combinedCurves = combinedExpressions.map((expression) => graph.computeCurve(expression, {}, -3, 3, 100));
   assert.equal(combinedCurves.length, 2, "multiple equations should produce multiple curves");
   assert.ok(combinedCurves.every((curve) => curve.some(Boolean)), "each selected equation should have drawable samples");
+
+  // Derivative: d/dx x^2 should produce 2*x
+  const derivExpr = graph.latexToExpr("\\frac{d}{dx}{x^2}");
+  graph.validateExpression(derivExpr);
+  const derivCurve = graph.computeCurve(derivExpr, {}, -3, 3, 20);
+  const derivAt2 = derivCurve.find(p => p && Math.abs(p[0] - 2) < 0.5);
+  assert.ok(derivAt2 && Math.abs(derivAt2[1] - 4) < 1, "d/dx x^2 at x=2 should be ~4");
+
+  // Degree: sin(30°) should be ~0.5
+  const degExpr = graph.latexToExpr("\\sin(30°)");
+  graph.validateExpression(degExpr);
+  const degCurve = graph.computeCurve(degExpr, {}, 0, 1, 1);
+  assert.ok(degCurve[0] && Math.abs(degCurve[0][1] - 0.5) < 0.01, "sin(30°) should be ~0.5");
+
+  // Factorial: 5! = 120
+  const factExpr = graph.latexToExpr("5!");
+  graph.validateExpression(factExpr);
+  const factCurve = graph.computeCurve(factExpr, {}, 0, 1, 1);
+  assert.ok(factCurve[0] && factCurve[0][1] === 120, "5! should be 120");
 
   console.log(`Passed: ${cases.length} expression forms, multi-curve sampling, coefficient extraction, domains, and asymptote gaps.`);
 } finally {

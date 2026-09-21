@@ -100,6 +100,7 @@ function overlaps(a: { x: number; y: number; w: number; h: number }, b: { x: num
   return a.x <= b.x + b.w && a.x + a.w >= b.x && a.y <= b.y + b.h && a.y + a.h >= b.y;
 }
 
+
 type ResizeHandle = "nw" | "ne" | "sw" | "se";
 
 function resizeBounds(start: { x: number; y: number; w: number; h: number }, handle: ResizeHandle, pointer: { x: number; y: number }, keepRatio: boolean) {
@@ -287,9 +288,9 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
   const [vizEmbeds, setVizEmbeds] = useState<VisualizationEmbed[]>([]);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; worldX: number; worldY: number; canEdit: boolean } | null>(null);
   const [selectedLatexIds, setSelectedLatexIds] = useState<Set<string>>(new Set());
+  const hasSelectedLatex = selectedLatexIds.size > 0;
   const [erasing, setErasing] = useState(false);
   const erasingRef = useRef(false);
-  const hasSelectedLatex = selectedLatexIds.size > 0;
 
   const setTool = useCallback((t: Tool) => { toolRef.current = t; _setTool(t); }, []);
 
@@ -315,7 +316,10 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
     const sourceOverlayIds = overlays.map((overlay) => overlay.id);
     if (graphs.some((g) => g.sourceOverlayIds.length === sourceOverlayIds.length && g.sourceOverlayIds.every((id) => sourceOverlayIds.includes(id)))) return;
     try {
-      overlays.forEach((overlay) => validateExpression(latexToExpr(overlay.latex)));
+      overlays.forEach((overlay) => {
+        const expr = latexToExpr(overlay.latex);
+        validateExpression(expr);
+      });
       const cam = cameraRef.current;
       const cvs = canvasRef.current;
       const viewW = (cvs?.clientWidth ?? 800) / cam.zoom;
@@ -350,8 +354,8 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
         sourceOverlayIds,
       };
       setGraphs((prev) => [...prev, graph]);
-    } catch {
-      // Expression couldn't be parsed — silently ignore
+    } catch (err) {
+      console.warn("[Graph] Failed to create graph:", err, overlays.map(o => o.latex));
     }
   }, [getSelectedLatexOverlays, graphs]);
 
@@ -1034,8 +1038,8 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
           hit.isDeleted = true;
           const survivors = removeLatexOverlays([hit.id]);
           if (survivors.length) setTimeout(() => sendRecognition(survivors), 300);
-          render();
         }
+        render();
         break;
       }
     }
@@ -1181,8 +1185,8 @@ const InfiniteCanvas = forwardRef<InfiniteCanvasHandle, InfiniteCanvasProps>(fun
         hit.isDeleted = true;
         const survivors = removeLatexOverlays([hit.id]);
         if (survivors.length) setTimeout(() => sendRecognition(survivors), 300);
-        render();
       }
+      render();
     }
   };
 

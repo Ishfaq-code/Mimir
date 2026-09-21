@@ -1,9 +1,9 @@
-import { compile, type EvalFunction } from "mathjs";
+import { compile, derivative as mathjsDerivative, type EvalFunction } from "mathjs";
 
 const FUNCTIONS = new Set([
   "abs", "acos", "acosh", "acot", "acoth", "acsc", "acsch", "asec", "asech",
   "asin", "asinh", "atan", "atanh", "cbrt", "ceil", "cos", "cosh", "cot", "coth",
-  "csc", "csch", "exp", "floor", "log", "log10", "ln", "max", "min", "round",
+  "csc", "csch", "exp", "factorial", "floor", "log", "log10", "max", "min", "round",
   "sec", "sech", "sign", "sin", "sinh", "sqrt", "tan", "tanh",
 ]);
 const CONSTANTS = new Set(["e", "pi"]);
@@ -109,6 +109,12 @@ function convertFunctionCommands(source: string): string {
   for (const name of LATEX_FUNCTIONS) {
     result = result.replace(new RegExp(`\\\\${name}\\b`, "g"), name);
   }
+  // \ln → log (mathjs uses log for natural log)
+  result = result.replace(/\\ln\b/g, "log");
+  // Bare ln with adjacent arg: lnx → log(x), ln(x) → log(x)
+  result = result.replace(/\bln\s*\(/g, "log(");
+  result = result.replace(/\bln\s+([A-Za-z0-9])/g, "log($1)");
+  result = result.replace(/\bln([A-Za-z0-9])/g, "log($1)");
   return result.replace(/\\pi\b/g, "pi");
 }
 
@@ -158,18 +164,118 @@ function convertAbsoluteValues(source: string): string {
   return result;
 }
 
+/** Pre-convert LaTeX inside a derivative argument so mathjs can differentiate it. */
+function preConvertForDerivative(inner: string): string {
+  // Recursively use the full latexToExpr pipeline (minus the y= strip)
+  let s = inner.trim();
+  s = s.replace(/\\left\s*|\\right\s*/g, "");
+  s = replaceFractions(s);
+  s = replaceRoots(s);
+  s = convertLogBase(s);
+  s = convertFunctionCommands(s);
+  s = convertSuperscripts(s);
+  s = s.replace(/\\cdot|\\times/g, "*").replace(/\\div/g, "/");
+  s = convertAbsoluteValues(s).replace(/[{}]/g, "");
+  s = normalizeShorthandFunctions(s);
+  for (const name of LATEX_FUNCTIONS) {
+    s = s.replace(new RegExp(`\\b${name}\\s+(?!\\s*\\()([A-Za-z0-9])`, "g"), `${name}($1)`);
+  }
+  s = s.replace(new RegExp(`\\b(${LATEX_FUNCTIONS.join("|")})\\s+\\(`, "g"), "$1(");
+  s = addImplicitMultiplication(protectNames(s)).trim();
+  return s;
+}
+
+function convertDerivatives(source: string): string {
+  let result = source;
+  // \frac{d}{dx}(...) or \frac{d}{dx}{expr} — symbolic derivative
+  result = result.replace(
+    /\\frac\s*\{\s*d\s*\}\s*\{\s*d\s*([a-zA-Z])\s*\}\s*\(([^()]*)\)/g,
+    (_, v: string, inner: string) => {
+      try { return mathjsDerivative(preConvertForDerivative(inner), v).toString(); }
+      catch { return `DERIV(${inner},${v})`; }
+    },
+  );
+  result = result.replace(
+    /\\frac\s*\{\s*d\s*\}\s*\{\s*d\s*([a-zA-Z])\s*\}\s*\{([^{}]*)\}/g,
+    (_, v: string, inner: string) => {
+      try { return mathjsDerivative(preConvertForDerivative(inner), v).toString(); }
+      catch { return `DERIV(${inner},${v})`; }
+    },
+  );
+  // \frac{d}{dx} followed by remaining text
+  result = result.replace(
+    /\\frac\s*\{\s*d\s*\}\s*\{\s*d\s*([a-zA-Z])\s*\}\s*([^\s,;]+)/g,
+    (_, v: string, inner: string) => {
+      try { return mathjsDerivative(preConvertForDerivative(inner), v).toString(); }
+      catch { return `DERIV(${inner},${v})`; }
+    },
+  );
+  // f'(x), f''(x) — prime notation
+  result = result.replace(/([a-zA-Z])\s*''\s*\(\s*([^()]*)\s*\)/g, (_, _fn: string, inner: string) => {
+    try {
+      const first = mathjsDerivative(preConvertForDerivative(inner), "x").toString();
+      return mathjsDerivative(first, "x").toString();
+    } catch { return `DERIV2(${inner})`; }
+  });
+  result = result.replace(/([a-zA-Z])\s*'\s*\(\s*([^()]*)\s*\)/g, (_, _fn: string, inner: string) => {
+    try { return mathjsDerivative(preConvertForDerivative(inner), "x").toString(); }
+    catch { return `DERIV(${inner},x)`; }
+  });
+  return result;
+}
+
+function convertLogBase(source: string): string {
+  // \log_{base}{arg} → log(arg, base)
+  let result = replaceCommand(source, "\\log_", (base, _opt) => {
+    // After reading the base, check if next char starts a group or token
+    return `LOG_BASE_${base}_`;
+  });
+  // Now handle LOG_BASE_n_{arg} or LOG_BASE_n(arg) or LOG_BASE_n token
+  result = result.replace(
+    /LOG_BASE_([^_]+)_\s*\{([^{}]*)\}/g,
+    "log($2, $1)",
+  );
+  result = result.replace(
+    /LOG_BASE_([^_]+)_\s*\(([^()]*)\)/g,
+    "log($2, $1)",
+  );
+  result = result.replace(
+    /LOG_BASE_([^_]+)_\s*([a-zA-Z0-9]+)/g,
+    "log($2, $1)",
+  );
+  // Simpler pattern: \log_2(x) after command conversion strips to log_2(x)
+  // Handle direct log_n patterns
+  result = result.replace(
+    /\blog_\{?(\d+)\}?\s*\(([^()]*)\)/g,
+    "log($2, $1)",
+  );
+  result = result.replace(
+    /\blog_\{?(\d+)\}?\s*([a-zA-Z])/g,
+    "log($2, $1)",
+  );
+  return result;
+}
+
+function convertFactorials(source: string): string {
+  // (expr)! → factorial(expr)
+  let result = source.replace(/\(([^()]+)\)\s*!/g, "factorial($1)");
+  // n! or x! — single token followed by !
+  result = result.replace(/([a-zA-Z0-9]+)\s*!/g, "factorial($1)");
+  return result;
+}
+
+const PROTECTED_NAMES = [...FUNCTIONS, ...CONSTANTS, "nthRoot", "DERIV2", "DERIV"];
+
 function protectNames(source: string): string {
   let result = source;
-  const names = [...FUNCTIONS, ...CONSTANTS, "nthRoot"];
-  names.forEach((name, index) => {
+  PROTECTED_NAMES.forEach((name, index) => {
     result = result.replace(new RegExp(`\\b${name}\\b`, "g"), `\u0001${index}\u0002`);
   });
   return result;
 }
 
 function restoreNames(source: string): string {
-  const names = [...FUNCTIONS, ...CONSTANTS, "nthRoot"];
-  return source.replace(/\u0001(\d+)\u0002/g, (_, index: string) => names[Number(index)] ?? "");
+  return source.replace(/\u0001(\d+)\u0002/g, (_, index: string) => PROTECTED_NAMES[Number(index)] ?? "");
 }
 
 function splitAdjacentLetters(source: string): string {
@@ -192,22 +298,41 @@ export function latexToExpr(latex: string): string {
   let source = latex.trim()
     .replace(/^\$\$?\s*|\s*\$\$?$/g, "")
     .replace(/^\\\[|\\\]$/g, "")
-    .replace(/\\left|\\right/g, "")
+    .replace(/\\left\s*|\\right\s*/g, "")
     .replace(/^[yY]\s*=\s*/, "")
     .replace(/^f\s*\(\s*x\s*\)\s*=\s*/i, "");
 
+  // Derivatives: \frac{d}{dx}f(x) or \frac{d}{dx}(expr)
+  source = convertDerivatives(source);
+
   source = replaceFractions(source);
   source = replaceRoots(source);
+
+  // Log with subscript base: \log_{2}(x) → log(x, 2), \log_2 x → log(x, 2)
+  source = convertLogBase(source);
+
   source = convertFunctionCommands(source);
   source = normalizeShorthandFunctions(source);
   source = convertSuperscripts(source);
   source = source.replace(/\\cdot|\\times/g, "*").replace(/\\div/g, "/");
+
+  // Degree symbol: 30° or 30^\circ or 30\degree → (30*pi/180)
+  source = source.replace(/(\d+(?:\.\d*)?)\s*\^?\s*(?:°|\\circ\b|\\degree\b)/g, "($1*pi/180)");
+  // Standalone degree after parenthesized expression: (expr)° → (expr)*pi/180
+  source = source.replace(/\)\s*\^?\s*(?:°|\\circ\b|\\degree\b)/g, ")*pi/180");
+
+  // Factorial: n! → factorial(n)
+  source = convertFactorials(source);
+
   source = convertAbsoluteValues(source).replace(/[{}]/g, "");
 
   // Turn the common `sin x` form into a call before adding multiplication.
+  // Skip if already followed by ( — that's already a call like sin(x) or sin (x).
   for (const name of LATEX_FUNCTIONS) {
-    source = source.replace(new RegExp(`\\b${name}\\s+([A-Za-z0-9(])`, "g"), `${name}($1)`);
+    source = source.replace(new RegExp(`\\b${name}\\s+(?!\\s*\\()([A-Za-z0-9])`, "g"), `${name}($1)`);
   }
+  // Collapse spaces between function name and opening paren: sin (x) → sin(x)
+  source = source.replace(new RegExp(`\\b(${LATEX_FUNCTIONS.join("|")})\\s+\\(`, "g"), "$1(");
   return addImplicitMultiplication(protectNames(source)).trim();
 }
 
